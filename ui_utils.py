@@ -32,6 +32,8 @@ sorttype = config.getint('Main Settings', 'sorttype') # Не трогать, о�
 upd_time = config.getfloat('Main Settings', 'upd_time') # Время обновления динамических данных о музыке (с) \хавает проц. оптимально 0.25-0.5 c:0.25
 autoplayswitch = config.getboolean('Main Settings', 'autoplayswitch') # Автопауза при смене трека
 idxDirrs = config.getboolean('Main Settings', 'idxDirrs') # если True читает все подпапки во время добавления в очередь папки, если False, только то что внутри папки
+max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
+#max_histlen *= -1
 
 
 # sorttype = 0 # не трогать, оставить 0 по стандарту
@@ -241,6 +243,13 @@ def load_track(page,path, play_btn_obj): #через проводник
     #cover = extract_cover(audio, tec_audio_info_num, p)
     tags["cover"] = extract_cover(audio, tec_audio_info_num, p)
     page.pubsub.send_all_on_topic("tags_update", tags)
+    # очистка истории < max_histlen
+    con_queue = sqlite3.connect('queue.db')
+    cursor = con_queue.cursor()
+    cursor.execute('DELETE FROM queue WHERE id < ?', (max_histlen,))
+    con_queue.commit()
+    con_queue.close()
+
 
 def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следующий, если False - предыдущий
     con_queue = sqlite3.connect('queue.db')
