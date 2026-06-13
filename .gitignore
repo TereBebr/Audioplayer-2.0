@@ -1,0 +1,6 @@
+__pycache__/
+assets/
+music/
+vlc_engine/
+gui.py
+*.db
