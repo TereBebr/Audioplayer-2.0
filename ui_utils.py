@@ -212,7 +212,7 @@ def slider_event(e: ft.ControlEvent, time_label):
 #Логика воспроизведение аудио ----
 
 def load_track(page,path, play_btn_obj): #через проводник
-    global player, tags, details, tec_audio_info_num,curr_sec,total_sec, is_paused
+    global player, tags, details, tec_audio_info_num, curr_sec, total_sec, is_paused
     curr_sec = 0
     total_sec = 0
     p = Path(path).resolve()

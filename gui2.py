@@ -20,23 +20,24 @@ text_size = config.getint('UI Settings', 'text_size') # рекомендуемо
 b_radius = config.getint('UI Settings', 'b_radius') #закругление ui c: 20
 radius = config.getint('UI Settings', 'radius') # закругление картинки c: 8
 
-# text_size=12 # рекомендуемое значение 13
-# b_radius = 10 #закругление c: 20
-# radius = 8 #закругление картинки c: 8
-
-#Конфиги adress_bar ======
+# Конфиги adress_bar =========
 adress_barBGCol = config.get('UI adress_bar', 'adress_barBGCol') # Цвет фона строки
 adress_barBGOp = config.getfloat('UI adress_bar','adress_barBGOp') # Прозрачность фона строки
 adress_barBorderCol = config.get('UI adress_bar','adress_barBorderCol') # Цвет рамки (обводки) строки
 adress_barBorderOp = config.getfloat('UI adress_bar','adress_barBorderOp') # Прозрачность рамки строки
-adress_ButtonIconCol = config.get('UI adress_bar','adress_ButtonIconCol') # Цвет иконки кнопки выбора файла справа от строки
-adress_ButtonBGCol = config.get('UI adress_bar','adress_ButtonBGCol') # Цвет фона кнопки выбора файла справа от строки
-adress_Button_BCol = config.get('UI adress_bar','adress_Button_BCol') # Цвет рамки (обводки) кнопки выбора файла справа от строки
-adress_Button_BTol = config.getfloat('UI adress_bar','adress_Button_BTol') # Толщина рамки (обводки) кнопки выбора файла справа от строки
-adress_Button_Radius = config.getfloat('UI adress_bar','adress_Button_Radius') # Сила скругления углов кнопки выбора файла справа от строки
-# ========================
-
-#--
+#Конфиги adress_button =======
+adress_ButtonIconCol = config.get('UI adress_button','adress_ButtonIconCol') # Цвет иконки кнопки выбора файла справа от строки
+adress_ButtonBGCol = config.get('UI adress_button','adress_ButtonBGCol') # Цвет фона кнопки выбора файла справа от строки
+adress_Button_BCol = config.get('UI adress_button','adress_Button_BCol') # Цвет рамки (обводки) кнопки выбора файла справа от строки
+adress_Button_BTol = config.getfloat('UI adress_button','adress_Button_BTol') # Толщина рамки (обводки) кнопки выбора файла справа от строки
+adress_Button_Radius = config.getfloat('UI adress_button','adress_Button_Radius') # Сила скругления углов кнопки выбора файла справа от строки
+#Конфиги search_bar ==========
+search_barBGCol = config.get('UI search_bar', 'search_barBGCol') # Цвет фона строки поиска
+search_barBGOp = config.getfloat('UI search_bar','search_barBGOp') # Прозрачность фона строки поиска
+search_barBorderCol = config.get('UI search_bar','search_barBorderCol') # Цвет рамки (обводки) строки поиска
+search_barBorderOp = config.getfloat('UI search_bar','search_barBorderOp') # Прозрачность рамки строки поиска
+search_bar_radius = config.getint('UI search_bar','search_bar_radius') # Сила скругления углов строки поиска
+# ============================
 
 def App(page: ft.Page):
     page.title = "App"
@@ -199,6 +200,16 @@ def App(page: ft.Page):
         bgcolor=ft.Colors.with_opacity(adress_barBGOp, adress_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
+
+    search_bar = ft.Container(
+        #content = ,
+        height=35,
+        border=ft.Border.all(1, ft.Colors.with_opacity(adress_barBorderOp, adress_barBorderCol)),
+        border_radius=search_bar_radius,
+        padding=5,
+        bgcolor=ft.Colors.with_opacity(adress_barBGOp, adress_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
+        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+    )
     # Объявления объектов -----
 
     track_title = ft.Text(tags["Название"] if tags["Название"] else Path(p).name, size=text_size + 2, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
@@ -305,11 +316,7 @@ def App(page: ft.Page):
                                                     )
                                                 ]
                                             ),
-                                            ft.Container( # Поиск
-                                                bgcolor=ft.Colors.BLACK,
-                                                height=40,
-                                                #content = ,
-                                            ),
+                                            search_bar, # Поиск
                                             explorer_tree  # динамический проводник
                                         ]
                                     )
