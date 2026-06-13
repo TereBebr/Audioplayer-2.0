@@ -204,10 +204,10 @@ def App(page: ft.Page):
     search_bar = ft.Container(
         #content = ,
         height=35,
-        border=ft.Border.all(1, ft.Colors.with_opacity(adress_barBorderOp, adress_barBorderCol)),
+        border=ft.Border.all(1, ft.Colors.with_opacity(search_barBorderOp, search_barBorderCol)),
         border_radius=search_bar_radius,
         padding=5,
-        bgcolor=ft.Colors.with_opacity(adress_barBGOp, adress_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
+        bgcolor=ft.Colors.with_opacity(search_barBGOp, search_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
     # Объявления объектов -----

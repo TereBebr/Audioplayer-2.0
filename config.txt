@@ -64,7 +64,7 @@ adress_Button_Radius = 8
 [UI search_bar] ; точечная настройка дизайна кнопки выбора файла
 
 ; Цвет фона строки поиска
-search_barBGCol = #146ba6
+search_barBGCol = #3c3e40
 
 ; Прозрачность фона строки поиска <=1.00
 search_barBGOp = 0.9
