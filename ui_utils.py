@@ -67,7 +67,56 @@ def extract_cover(audio, tec_audio_info_num, path):
             if hasattr(audio, 'pictures') and audio.pictures:
                 raw_data = audio.pictures[0].data
         return raw_data
+
+def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
+    if not os.path.exists(path):
+        return None
+    raw_data = None
+    # === ШАГ 1: Извлечение оригинальных байтов ===
+    try:
+        # mutagen.File автоматически определяет формат аудиофайла
+        audio = mutagen.File(path) 
+        if audio is None:
+            return None
+
+        # (ID3)
+        if hasattr(audio, 'tags') and audio.tags:
+            for tag in audio.tags.values():
+                if isinstance(tag, APIC) or (hasattr(tag, 'type') and 'pic' in str(tag).lower()): # type: ignore
+                    raw_data = tag.data
+                    break
         
+        # (FLAC, OGG, некоторые MP4)
+        if not raw_data and hasattr(audio, 'pictures') and audio.pictures:
+            raw_data = audio.pictures[0].data
+
+    except Exception as e:
+        print(f"Ошибка при чтении тегов из {path}: {e}")
+        return None
+
+    # === ШАГ 2: Сжатие для базы данных ===
+    if raw_data:
+        try:
+            image = Image.open(io.BytesIO(raw_data))
+            
+            # Убираем альфа-канал, если это PNG, чтобы JPEG не выдал ошибку
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+            
+            image.thumbnail((50,50), Image.Resampling.LANCZOS)
+            # Сохраняем в новый байтовый буфер
+            output_buffer = io.BytesIO()
+            image.save(output_buffer, format="JPEG", quality=85)
+            
+            return output_buffer.getvalue()
+            
+        except Exception as e:
+            print(f"Ошибка при сжатии картинки {path}: {e}")
+            # Если Pillow не смог прочитать байты (битая картинка), 
+            # возвращаем оригинальные байты как страховку
+            return raw_data
+    return None
+
 #Функции проводника ----
 
 def get_folder_content(folder_path: str | Path):#анализ текущей папки (выбранной)

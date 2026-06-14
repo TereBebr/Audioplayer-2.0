@@ -9,13 +9,14 @@ def create_queue():
     "id" INTEGER NOT NULL,
 	"name"	TEXT NOT NULL,
 	"author" TEXT,
-	"path"	TEXT NOT NULL
+	"path"	TEXT NOT NULL,
+    "cov_bytes" BLOB
     ) ''')
     #connection.commit()
     #con_queue.close()
     con_queue.close()
-    print("queue.db инициализорована")
-    
+    print("queue.db инициализирована")
+
 def create_plfav():
     con_fav = sqlite3.connect('favoritepl.db')
     cursor = con_fav.cursor()
@@ -24,13 +25,12 @@ def create_plfav():
     CREATE TABLE IF NOT EXISTS "favorite" (
 	"name"	TEXT NOT NULL,
     "author" TEXT,
-	"cov_bites"	TEXT,
 	"path"	TEXT NOT NULL,
-	"seed"	INTEGER NOT NULL,
+	"cov_bytes"	BLOB,
+   	"seed"	INTEGER NOT NULL,
 	"reps" INTEGER
-
 	) ''')
 	
     con_fav.commit()
     con_fav.close()
-    print("favoritepl.db инициализорована")
+    print("favoritepl.db инициализирована")
