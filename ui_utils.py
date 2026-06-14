@@ -2,6 +2,7 @@ import flet as ft
 import os
 import time
 import mutagen
+from mutagen.id3 import APIC
 from pathlib import Path
 from itertools import chain
 import utils
@@ -69,8 +70,8 @@ def extract_cover(audio, tec_audio_info_num, path):
         return raw_data
 
 def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
-    if not os.path.exists(path):
-        return None
+    # if not os.path.exists(path):
+    #     return None
     raw_data = None
     # === ШАГ 1: Извлечение оригинальных байтов ===
     try:
@@ -157,11 +158,13 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             #в 0 эл. очереди
             audio = mutagen.File(p)
             tags = utils.get_audio_tags(audio, p.stem)
+            miniature = extract_cover_bytes(p)
+
             con_queue = sqlite3.connect('queue.db')
             cursor = con_queue.cursor()
             cursor.execute('DELETE FROM queue WHERE id = ?', (0,))
-            cursor.execute("INSERT INTO queue (id, name, author, path) VALUES (?, ?, ?, ?)", 
-                           (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p)))
+            cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)", 
+                           (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p), miniature))
             con_queue.commit()
             con_queue.close()
 
@@ -343,11 +346,12 @@ def add_queue(p): #добавление в конец очереди файла,
                 tags = utils.get_audio_tags(audio, obj.stem)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
+                miniature = extract_cover_bytes(obj)
                 last_id += 1
 
                 cursor.execute(
-                    "INSERT INTO queue (id, name, author, path) VALUES (?, ?, ?, ?)",
-                    (last_id, name, author, str(obj)))
+                    "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+                    (last_id, name, author, str(obj), miniature))
             except Exception as e:
                 print(f"Ошибка чтения файла {obj}: {e}")
         
