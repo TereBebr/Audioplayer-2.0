@@ -33,22 +33,9 @@ upd_time = config.getfloat('Main Settings', 'upd_time') # Время обнов�
 autoplayswitch = config.getboolean('Main Settings', 'autoplayswitch') # Автопауза при смене трека
 idxDirrs = config.getboolean('Main Settings', 'idxDirrs') # если True читает все подпапки во время добавления в очередь папки, если False, только то что внутри папки
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
-#max_histlen *= -1
-
-
-# sorttype = 0 # не трогать, оставить 0 по стандарту
-# autoplayswitch = False #Автопауза при смене трека
-# upd_time = 0.25 # время обновления динамических данных о музыке (с) \хавает проц. оптимально 0.25-0.5 c:0.25
 
 
 #Системные функции ----
-
-# def init_data(p, t, d, ts):
-#     global player, tags, details, total_sec
-#     player = p
-#     tags = t
-#     details = d
-#     total_sec = ts
 
 def rgba(r: int, g: int, b: int, a: int = 255) -> str:
     """Конвертирует привычные RGBA (0-255) в формат ARGB-строки для Flet.
@@ -73,7 +60,7 @@ def extract_cover(audio, tec_audio_info_num, path):
         if tec_audio_info_num == 1: #mp3, ogg
             if hasattr(audio, 'tags') and audio.tags is not None:
                 for tag in audio.tags.values():
-                    if hasattr(tag, 'data') and (hasattr(tag, 'type') and 'pic' in str(tag).lower() or isinstance(tag, APIC)):
+                    if hasattr(tag, 'data') and (hasattr(tag, 'type') and 'pic' in str(tag).lower() or isinstance(tag, APIC)): # type: ignore
                         raw_data = tag.data
                         break
         elif tec_audio_info_num == 2: #flac, wav
@@ -98,7 +85,7 @@ def get_folder_content(folder_path: str | Path):#анализ текущей п�
                 tracks.append({"name": obj.name, "path": str(obj), "type": "track"})
     except PermissionError:
         # Защита от системных папок, куда Windows не пускает
-        pass 
+        pass
 
     #Виды сортировок // потом как-нибудь
     match sorttype:
@@ -124,8 +111,8 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             con_queue = sqlite3.connect('queue.db')
             cursor = con_queue.cursor()
             cursor.execute('DELETE FROM queue WHERE id = ?', (0,))
-            cursor.execute("INSERT INTO queue (id, name, author, cov_bites, path) VALUES (?, ?, ?, ?, ?)", 
-                           (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], ".", str(p)))
+            cursor.execute("INSERT INTO queue (id, name, author, path) VALUES (?, ?, ?, ?)", 
+                           (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p)))
             con_queue.commit()
             con_queue.close()
 
@@ -310,8 +297,8 @@ def add_queue(p): #добавление в конец очереди файла,
                 last_id += 1
 
                 cursor.execute(
-                    "INSERT INTO queue (id, name, author, cov_bites, path) VALUES (?, ?, ?, ?, ?)",
-                    (last_id, name, author, ".", str(obj)))
+                    "INSERT INTO queue (id, name, author, path) VALUES (?, ?, ?, ?)",
+                    (last_id, name, author, str(obj)))
             except Exception as e:
                 print(f"Ошибка чтения файла {obj}: {e}")
         

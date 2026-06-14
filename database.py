@@ -9,7 +9,6 @@ def create_queue():
     "id" INTEGER NOT NULL,
 	"name"	TEXT NOT NULL,
 	"author" TEXT,
-	"cov_bites"	TEXT,
 	"path"	TEXT NOT NULL
     ) ''')
     #connection.commit()
@@ -24,7 +23,8 @@ def create_plfav():
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS "favorite" (
 	"name"	TEXT NOT NULL,
-	"adress"	TEXT NOT NULL,
+    "author" TEXT,
+	"cov_bites"	TEXT,
 	"path"	TEXT NOT NULL,
 	"seed"	INTEGER NOT NULL,
 	"reps" INTEGER

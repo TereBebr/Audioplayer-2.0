@@ -49,7 +49,7 @@ if __name__ == "__main__":
     #file_name = temp(file_path)
     
     database.create_queue()
-    #database.create_plfav()
+    database.create_plfav()
 
     
     # file_path, file_name, full_path = utils.import_paths(base_dir,file_name)
