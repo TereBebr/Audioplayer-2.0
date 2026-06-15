@@ -223,8 +223,20 @@ def playpause_btn_ev(e, play_btn_obj):
                 play_btn_obj.src="assets/icons/pause_ico_inac.png"
             play_btn_obj.update()
         else:
-            #следующий трек + создание плеера
-            print("нет объекта player")
+            try:
+                con_queue = sqlite3.connect('queue.db')
+                cursor = con_queue.cursor()
+                cursor.execute("SELECT path FROM queue WHERE id = 0")
+                r = cursor.fetchone()
+                con_queue.close()
+                
+                if r:
+                    load_track(e.page, r[0], play_btn_obj)
+                    #player.play()
+                    #смена иконки
+            except Exception as ex:
+                print(f"Нет id 0: {ex}")
+                pass
             #player.play()
             #смена иконки
 
