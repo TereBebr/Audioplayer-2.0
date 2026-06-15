@@ -338,7 +338,7 @@ def add_queue(p): #добавление в конец очереди файла,
 
     cursor.execute("SELECT MAX(id) FROM queue")
     last_id = cursor.fetchone()[0] or 0 # Если таблица пустая, получим -1 ##изменил на 0
-
+    
     try:
         for obj in files_to_add:
             try:

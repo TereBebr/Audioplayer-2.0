@@ -3,7 +3,7 @@ import ui_utils
 from pathlib import Path
 from ui_utils import bg_ui_process
 import os
-
+import sqlite3
 
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 p = './music' #начальная папка
@@ -99,7 +99,10 @@ def App(page: ft.Page):
                         data=item["path"], 
                         content=ft.ContextMenu( # ТЕПЕРЬ МЕНЮ ЕСТЬ И У ФАЙЛОВ!
                             secondary_items=[
-                                ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: ui_utils.add_queue(p)),
+                                ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: (
+                                    ui_utils.add_queue(p), 
+                                    rebuild_queue_ui()
+                                )),
                                 ft.PopupMenuItem(content=ft.Text("Вставить"), on_click=lambda _: print("Вставляем...")),
                                 ft.PopupMenuItem(content=ft.Text("Удалить"), on_click=lambda _: print("Удаляем...")),
                             ],
@@ -165,8 +168,118 @@ def App(page: ft.Page):
                 )
                 
         return spans
-
     path_text = ft.Text(spans=build_breadcrumbs(p), no_wrap=True)
+
+    queue_list = ft.Column(
+        spacing=8,
+        scroll=ft.ScrollMode.AUTO, 
+        expand=True,
+        alignment=ft.MainAxisAlignment.START
+    )
+    
+    def rebuild_queue_ui():
+        queue_list.controls.clear()
+        
+        con = sqlite3.connect('queue.db')
+        cursor = con.cursor()
+        # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
+        cursor.execute("SELECT id, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
+        rows = cursor.fetchall()
+        con.close()
+
+        for row in rows:
+            track_id, name, author, path, cov_bytes = row
+            
+            # 1. Визуальное оформление играющего трека (id == 0)
+            is_playing = (track_id == 0)
+            border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
+            bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
+
+            # Попытка декодировать обложку (если она есть)
+            # cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=40)
+            # if cov_bytes is not None:
+            #     pass
+            # else:
+            #     cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=40, color=ft.Colors.GRAY)
+            item_content = ft.Container(
+                content=ft.Row([
+                    #cover_img,
+                    ft.Column([
+                        ft.Text(name, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
+                        ft.Text(author, size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+                    ], spacing=2)
+                ]),
+                padding=10,
+                border=ft.Border.all(2, border_color),
+                border_radius=8,
+                bgcolor=bg_color
+            )
+
+            # 2. Обработчик Drop (когда на этот элемент что-то бросают)
+            # def on_accept(e, target_id=track_id):
+            #     # Получаем перетаскиваемый объект по его src_id
+            #     src_control = page.get_control(e.src_id)
+            #     src_data = src_control.data 
+                
+            #     # Если data - это путь (строка), значит притащили из проводника
+            #     if isinstance(src_data, str): 
+            #         insert_into_queue_db(src_data, target_id)
+                
+            #     # Если data - это ID (число), значит двигаем внутри очереди
+            #     elif isinstance(src_data, int): 
+            #         reorder_queue_db(src_data, target_id)
+                    
+            #     # Перестраиваем UI после изменения БД
+            #     rebuild_queue_ui(page, queue_container)
+
+            # 3. Визуальный отклик при наведении (hover)
+            def on_will_accept(e):
+                e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
+                e.control.update()
+
+            def on_leave(e):
+                # Возвращаем стандартную рамку
+                border_col = ft.Colors.GREEN if e.control.data == 0 else ft.Colors.TRANSPARENT
+                e.control.content.content.border = ft.Border.all(2, border_col)
+                e.control.update()
+
+            # 4. Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
+            drag_item = ft.DragTarget(
+                group="queue_drag", # ВАЖНО: Общая группа с проводником
+                data=track_id, # Сохраняем target_id в данных таргета для on_leave
+                #on_accept=on_accept,
+                on_will_accept=on_will_accept,
+                on_leave=on_leave,
+                content=ft.Draggable(
+                    group="queue_drag",
+                    data=track_id, # Передаем ID при перетаскивании
+                    content=item_content,
+                    content_when_dragging=ft.Container(
+                        content=ft.Text(f"Перемещение: {name}", size=12),
+                        padding=10,
+                        bgcolor=ft.Colors.INVERSE_SURFACE,
+                        border_radius=8,
+                        opacity=0.8
+                    )
+                )
+            )
+            
+            queue_list.controls.append(drag_item)
+
+        page.update()
+
+    queue_panel = ft.Container(
+        content=ft.Column([
+            #ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
+            ft.Divider(),
+            queue_list
+        ]),
+        expand=True,
+        padding=10,
+        border_radius=b_radius,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+    )
+    rebuild_queue_ui()
 
     # ListView с простым режимом прокрутки
     path_row = ft.Row(
@@ -346,7 +459,7 @@ def App(page: ft.Page):
                                         colors=["#DCDF25", "#7F18DF"]
                                     ),
 
-                                    #content = ft.
+                                    content = queue_panel
                                 )
                             ]
                         ),
@@ -478,6 +591,8 @@ def App(page: ft.Page):
         
         if message.get("cover", ""): track_cover.src = message.get("cover", "") 
         else: track_cover.src = "https://flet.dev/img/logo.svg"
+
+        rebuild_queue_ui()
 
         page.update()
 
