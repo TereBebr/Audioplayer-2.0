@@ -101,7 +101,7 @@ def App(page: ft.Page):
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: (
                                     ui_utils.add_queue(p), 
-                                    skip_track_with_animation(page, queue_list, rebuild_queue_ui)
+                                    rebuild_queue_ui()
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Вставить"), on_click=lambda _: print("Вставляем...")),
                                 ft.PopupMenuItem(content=ft.Text("Удалить"), on_click=lambda _: print("Удаляем...")),
@@ -187,6 +187,7 @@ def App(page: ft.Page):
         rows = cursor.fetchall()
         con.close()
 
+        anim_config = ft.Animation(350, ft.AnimationCurve.EASE_OUT)
         for row in rows:
             track_id, name, author, path, cov_bytes = row
             
@@ -215,9 +216,12 @@ def App(page: ft.Page):
                 bgcolor=bg_color,
                 # --- ДОБАВЛЯЕМ ДЛЯ АНИМАЦИИ ---
                 height=65,  # Фиксированная высота важна, чтобы Flet знал от чего "схлопывать"
-                animate=ft.Animation(350, ft.AnimationCurve.EASE_IN_OUT),          # Анимирует изменение height
-                animate_opacity=ft.Animation(350, ft.AnimationCurve.EASE_IN_OUT),
-                clip_behavior=ft.ClipBehavior.HARD_EDGE  # Чтобы текст не вылезал за границы при сжатии
+                opacity=1.0, # Явно указываем стартовую непрозрачность
+                offset=ft.Offset(0, 0), # Явно указываем стартовую позицию (на месте)
+                animate=anim_config,          
+                animate_opacity=anim_config,  
+                animate_offset=anim_config,   # <--- Включаем анимацию сдвига
+                clip_behavior=ft.ClipBehavior.HARD_EDGE
             )
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
@@ -239,13 +243,13 @@ def App(page: ft.Page):
 
             # 3. Визуальный отклик при наведении (hover)
             def on_will_accept(e):
-                e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
+                # e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
                 e.control.update()
 
             def on_leave(e):
                 # Возвращаем стандартную рамку
-                border_col = ft.Colors.GREEN if e.control.data == 0 else ft.Colors.TRANSPARENT
-                e.control.content.content.border = ft.Border.all(2, border_col)
+                # border_col = ft.Colors.GREEN if e.control.data == 0 else ft.Colors.TRANSPARENT
+                # e.control.content.content.border = ft.Border.all(2, border_col)
                 e.control.update()
 
             # 4. Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
@@ -274,21 +278,35 @@ def App(page: ft.Page):
         page.update()
     def skip_track_with_animation(page, queue_list, rebuild_callback):
         """
-        Визуально гасит трек id=0, смещает очередь вверх и затем жестко обновляет UI.
-        БД не трогает — только визуал.
+        Визуально уводит отыгравший трек влево и гасит его,
+        плавно подсвечивает зелёным следующий трек,
+        смещает очередь вверх и затем обновляет UI.
         """
-        if queue_list.controls:
-            # 1. Достаем самый первый элемент из списка UI
+        if len(queue_list.controls) > 0:
+            # 1. Берем ПЕРВЫЙ элемент и анимируем его (уводим влево)
             first_item = queue_list.controls[0]
-            # 2. Пробиваемся к нашему item_content сквозь матрешку (DragTarget -> Draggable -> Container)
-            item_container = first_item.content.content
-            # 3. Включаем анимацию: гасим прозрачность и схлопываем высоту в 0
-            item_container.opacity = 0
-            item_container.height = 0
-            # Обновляем страницу, чтобы Flet отрисовал переход
+            first_container = first_item.content.content
+            
+            first_container.opacity = 0
+            first_container.offset = ft.Offset(-1, 0)
+            first_container.border = ft.Border.all(0, ft.Colors.TRANSPARENT)
+
+            # 2. Если есть СЛЕДУЮЩИЙ элемент, заранее красим его в активный
+            if len(queue_list.controls) > 1:
+                next_item = queue_list.controls[1]
+                next_container = next_item.content.content
+                # next_container.border = ft.Border.all(2, ft.Colors.GREEN)
+                # next_container.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
+                try:
+                    row_controls = next_container.content.controls
+                    column_control = row_controls[-1] 
+                    title_text = column_control.controls[0] 
+                    title_text.color = ft.Colors.GREEN
+                except Exception:
+                    pass
+            # Запускаем анимацию на фронтенде
             page.update()
-            # 4. Ждем завершения анимации (350 миллисекунд = 0.35 сек)
-            time.sleep(0.35)
+            time.sleep(0.45)
         rebuild_callback()
 
     queue_panel = ft.Container(
