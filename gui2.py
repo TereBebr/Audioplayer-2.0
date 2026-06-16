@@ -4,7 +4,7 @@ from pathlib import Path
 from ui_utils import bg_ui_process
 import os
 import sqlite3
-
+import time
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 p = './music' #начальная папка
 folder_items = ui_utils.fnew_path(p) #обработчик для начальной папки
@@ -101,7 +101,7 @@ def App(page: ft.Page):
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: (
                                     ui_utils.add_queue(p), 
-                                    rebuild_queue_ui()
+                                    skip_track_with_animation(page, queue_list, rebuild_queue_ui)
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Вставить"), on_click=lambda _: print("Вставляем...")),
                                 ft.PopupMenuItem(content=ft.Text("Удалить"), on_click=lambda _: print("Удаляем...")),
@@ -212,7 +212,12 @@ def App(page: ft.Page):
                 padding=10,
                 border=ft.Border.all(2, border_color),
                 border_radius=8,
-                bgcolor=bg_color
+                bgcolor=bg_color,
+                # --- ДОБАВЛЯЕМ ДЛЯ АНИМАЦИИ ---
+                height=65,  # Фиксированная высота важна, чтобы Flet знал от чего "схлопывать"
+                animate=ft.Animation(350, ft.AnimationCurve.EASE_IN_OUT),          # Анимирует изменение height
+                animate_opacity=ft.Animation(350, ft.AnimationCurve.EASE_IN_OUT),
+                clip_behavior=ft.ClipBehavior.HARD_EDGE  # Чтобы текст не вылезал за границы при сжатии
             )
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
@@ -267,6 +272,24 @@ def App(page: ft.Page):
             queue_list.controls.append(drag_item)
 
         page.update()
+    def skip_track_with_animation(page, queue_list, rebuild_callback):
+        """
+        Визуально гасит трек id=0, смещает очередь вверх и затем жестко обновляет UI.
+        БД не трогает — только визуал.
+        """
+        if queue_list.controls:
+            # 1. Достаем самый первый элемент из списка UI
+            first_item = queue_list.controls[0]
+            # 2. Пробиваемся к нашему item_content сквозь матрешку (DragTarget -> Draggable -> Container)
+            item_container = first_item.content.content
+            # 3. Включаем анимацию: гасим прозрачность и схлопываем высоту в 0
+            item_container.opacity = 0
+            item_container.height = 0
+            # Обновляем страницу, чтобы Flet отрисовал переход
+            page.update()
+            # 4. Ждем завершения анимации (350 миллисекунд = 0.35 сек)
+            time.sleep(0.35)
+        rebuild_callback()
 
     queue_panel = ft.Container(
         content=ft.Column([
@@ -279,7 +302,7 @@ def App(page: ft.Page):
         border_radius=b_radius,
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
     )
-    rebuild_queue_ui()
+    skip_track_with_animation(page, queue_list, rebuild_queue_ui)
 
     # ListView с простым режимом прокрутки
     path_row = ft.Row(
@@ -592,7 +615,7 @@ def App(page: ft.Page):
         if message.get("cover", ""): track_cover.src = message.get("cover", "") 
         else: track_cover.src = "https://flet.dev/img/logo.svg"
 
-        rebuild_queue_ui()
+        skip_track_with_animation(page, queue_list, rebuild_queue_ui)
 
         page.update()
 
