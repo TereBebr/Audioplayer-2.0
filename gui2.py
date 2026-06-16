@@ -197,20 +197,20 @@ def App(page: ft.Page):
             bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
 
             # Попытка декодировать обложку (если она есть)
-            # cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=40)
-            # if cov_bytes is not None:
-            #     pass
-            # else:
-            #     cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=40, color=ft.Colors.GRAY)
+            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=45)
+            if cov_bytes is not None:
+                cover_img = ft.Image(src=cov_bytes, width=45, height=45)
+                pass
+            
             item_content = ft.Container(
                 content=ft.Row([
-                    #cover_img,
+                    cover_img,
                     ft.Column([
                         ft.Text(name, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
                         ft.Text(author, size=12, color=ft.Colors.ON_SURFACE_VARIANT)
                     ], spacing=2)
                 ]),
-                padding=10,
+                padding=8,
                 border=ft.Border.all(2, border_color),
                 border_radius=8,
                 bgcolor=bg_color,
@@ -241,9 +241,9 @@ def App(page: ft.Page):
             #     # Перестраиваем UI после изменения БД
             #     rebuild_queue_ui(page, queue_container)
 
-            # 3. Визуальный отклик при наведении (hover)
+            # 3. Визуальный отклик при взаимодействии
             def on_will_accept(e):
-                # e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
+                #e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
                 e.control.update()
 
             def on_leave(e):
@@ -276,7 +276,7 @@ def App(page: ft.Page):
             queue_list.controls.append(drag_item)
 
         page.update()
-    def skip_track_with_animation(page, queue_list, rebuild_callback):
+    def skip_track_with_animation(page, queue_list, rebuild_callback, idx):
         """
         Визуально уводит отыгравший трек влево и гасит его,
         плавно подсвечивает зелёным следующий трек,
@@ -301,7 +301,8 @@ def App(page: ft.Page):
                     row_controls = next_container.content.controls
                     column_control = row_controls[-1] 
                     title_text = column_control.controls[0] 
-                    title_text.color = ft.Colors.GREEN
+                    if idx == 1:
+                        title_text.color = ft.Colors.GREEN
                 except Exception:
                     pass
             # Запускаем анимацию на фронтенде
@@ -320,7 +321,7 @@ def App(page: ft.Page):
         border_radius=b_radius,
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
     )
-    skip_track_with_animation(page, queue_list, rebuild_queue_ui)
+    skip_track_with_animation(page, queue_list, rebuild_queue_ui, 0)
 
     # ListView с простым режимом прокрутки
     path_row = ft.Row(
@@ -629,11 +630,14 @@ def App(page: ft.Page):
         track_artist.value = message.get("Автор", "Неизвестный исполнитель")
         track_album.value = message.get("Альбом", "")
         track_year.value = message.get("Год", "")
+        idx = message.get("idx", 0)
         
         if message.get("cover", ""): track_cover.src = message.get("cover", "") 
         else: track_cover.src = "https://flet.dev/img/logo.svg"
-
-        skip_track_with_animation(page, queue_list, rebuild_queue_ui)
+        if idx == -2: #-2 для случая, когда трек загружается первым, чтобы не дергать анимацию
+            rebuild_queue_ui()
+        else:
+            skip_track_with_animation(page, queue_list, rebuild_queue_ui, idx)
 
         page.update()
 

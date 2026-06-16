@@ -168,7 +168,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             con_queue.commit()
             con_queue.close()
 
-            load_track(e.page,p, play_btn_obj)
+            load_track(e.page,p, play_btn_obj, 0)
             print(f"файл: {p}")
 
 def fnew_path(p):
@@ -231,7 +231,7 @@ def playpause_btn_ev(e, play_btn_obj):
                 con_queue.close()
                 
                 if r:
-                    load_track(e.page, r[0], play_btn_obj)
+                    load_track(e.page, r[0], play_btn_obj, -2)
                     #player.play()
                     #смена иконки
             except Exception as ex:
@@ -262,7 +262,7 @@ def slider_event(e: ft.ControlEvent, time_label):
 
 #Логика воспроизведение аудио ----
 
-def load_track(page,path, play_btn_obj): #через проводник
+def load_track(page,path, play_btn_obj, idx): #через проводник
     global player, tags, details, tec_audio_info_num, curr_sec, total_sec, is_paused
     curr_sec = 0
     total_sec = 0
@@ -293,6 +293,7 @@ def load_track(page,path, play_btn_obj): #через проводник
     details = utils.get_audio_info(audio, tec_audio_info_num)
     #cover = extract_cover(audio, tec_audio_info_num, p)
     tags["cover"] = extract_cover(audio, tec_audio_info_num, p)
+    tags["idx"] = idx
     page.pubsub.send_all_on_topic("tags_update", tags)
     # очистка истории < max_histlen
     con_queue = sqlite3.connect('queue.db')
@@ -308,11 +309,13 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
     if switch:
         cursor.execute("SELECT path FROM queue WHERE id = 1")
         r = cursor.fetchone()
+        idx = 1
         if r:
             cursor.execute("UPDATE queue SET id = id -1")
     else:
         cursor.execute("SELECT path FROM queue WHERE id = -1")
         r = cursor.fetchone()
+        idx = 0
         if r:
             cursor.execute("UPDATE queue SET id = id +1")
 
@@ -325,7 +328,7 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
     if r:
         real_path = r[0] # Берем строку из кортежа
         # load_track сам сделает Path(real_path).resolve()
-        load_track(e.page, real_path, play_btn_obj)
+        load_track(e.page, real_path, play_btn_obj, idx)
     else:
         print("В очереди нет треков для воспроизведения")
 
@@ -407,7 +410,7 @@ def bg_ui_process(page: ft.Page, play_btn):
                         real_path = r[0]
                         curr_sec = 0
                         total_sec = 0
-                        load_track(page, real_path, play_btn)
+                        load_track(page, real_path, play_btn, 1)
                 
             time.sleep(upd_time)
     threading.Thread(target=run, daemon=True).start()
