@@ -37,6 +37,14 @@ search_barBGOp = config.getfloat('UI search_bar','search_barBGOp') # Прозр�
 search_barBorderCol = config.get('UI search_bar','search_barBorderCol') # Цвет рамки (обводки) строки поиска
 search_barBorderOp = config.getfloat('UI search_bar','search_barBorderOp') # Прозрачность рамки строки поиска
 search_bar_radius = config.getint('UI search_bar','search_bar_radius') # Сила скругления углов строки поиска
+# ==== queue_cell presets: ===
+queue_border_radius = 8
+#queue_cell = (45, 15, 12, 2, 8, 60) #настройки для ячейки очереди (размер обложки, размер названия, размер автора, расстояние между ними, отступы внутри ячейки, высота ячейки)
+#queue_cell = (35, 13, 10, 2, 3, 48)
+#queue_cell = (28, 11, 8, 0, 1, 33)
+#queue_cell = (22, 9, 6, 0, 0.5, 27)
+k = 0.7
+queue_cell = ((46 * k + 8.2), (12 * k + 5.4), (12 * k + 2.4), (4 * k - 1.2), (15 * k - 4), (76 * k + 4.2))
 # ============================
 
 def App(page: ft.Page):
@@ -179,7 +187,26 @@ def App(page: ft.Page):
     
     def rebuild_queue_ui():
         queue_list.controls.clear()
-        
+        def on_track_click(clicked_id):
+            if clicked_id == 0:
+                return # Трек уже играет
+            con = sqlite3.connect('queue.db')
+            cursor = con.cursor()
+            try:
+                cursor.execute("UPDATE queue SET id = id - ?", (clicked_id,))
+                cursor.execute("SELECT path FROM queue WHERE id = 0")
+                r = cursor.fetchone()
+                path = r[0] if r else None
+                con.commit()
+            except Exception as ex:
+                print(f"Ошибка при обновлении очереди в БД: {ex}")
+                con.rollback()
+            finally:
+                con.close()
+            
+            ui_utils.load_track(page, path, play_btn, clicked_id)
+            rebuild_queue_ui()
+
         con = sqlite3.connect('queue.db')
         cursor = con.cursor()
         # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
@@ -197,31 +224,32 @@ def App(page: ft.Page):
             bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
 
             # Попытка декодировать обложку (если она есть)
-            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=45)
+            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
             if cov_bytes is not None:
-                cover_img = ft.Image(src=cov_bytes, width=45, height=45)
+                cover_img = ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
                 pass
             
             item_content = ft.Container(
                 content=ft.Row([
                     cover_img,
                     ft.Column([
-                        ft.Text(name, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
-                        ft.Text(author, size=12, color=ft.Colors.ON_SURFACE_VARIANT)
-                    ], spacing=2)
+                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
+                        ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                    ], spacing=queue_cell[3])
                 ]),
-                padding=8,
+                padding=queue_cell[4],
                 border=ft.Border.all(2, border_color),
-                border_radius=8,
+                border_radius=queue_border_radius,
                 bgcolor=bg_color,
                 # --- ДОБАВЛЯЕМ ДЛЯ АНИМАЦИИ ---
-                height=65,  # Фиксированная высота важна, чтобы Flet знал от чего "схлопывать"
+                height=queue_cell[5],  # Фиксированная высота важна, чтобы Flet знал от чего "схлопывать"
                 opacity=1.0, # Явно указываем стартовую непрозрачность
                 offset=ft.Offset(0, 0), # Явно указываем стартовую позицию (на месте)
-                animate=anim_config,          
-                animate_opacity=anim_config,  
+                animate=anim_config,
+                animate_opacity=anim_config,
                 animate_offset=anim_config,   # <--- Включаем анимацию сдвига
-                clip_behavior=ft.ClipBehavior.HARD_EDGE
+                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                on_click=lambda e, t_id=track_id: on_track_click(t_id)
             )
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
@@ -264,17 +292,16 @@ def App(page: ft.Page):
                     data=track_id, # Передаем ID при перетаскивании
                     content=item_content,
                     content_when_dragging=ft.Container(
-                        content=ft.Text(f"Перемещение: {name}", size=12),
-                        padding=10,
+                        content=ft.Text(f"Перемещение: {name}", size=queue_cell[1]),
+                        padding=queue_cell[4],
+                        expand=True,
                         bgcolor=ft.Colors.INVERSE_SURFACE,
-                        border_radius=8,
+                        border_radius=queue_border_radius,
                         opacity=0.8
                     )
                 )
             )
-            
             queue_list.controls.append(drag_item)
-
         page.update()
     def skip_track_with_animation(page, queue_list, rebuild_callback, idx):
         """
