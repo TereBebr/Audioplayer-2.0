@@ -249,42 +249,113 @@ def App(page: ft.Page):
                 animate_opacity=anim_config,
                 animate_offset=anim_config,   # <--- Включаем анимацию сдвига
                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                on_click=lambda e, t_id=track_id: on_track_click(t_id)
+                data=track_id, # Сохраняем ID прямо в контейнер
+                on_click=lambda e: on_track_click(e.control.data)
             )
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
-            # def on_accept(e, target_id=track_id):
-            #     # Получаем перетаскиваемый объект по его src_id
-            #     src_control = page.get_control(e.src_id)
-            #     src_data = src_control.data 
-                
-            #     # Если data - это путь (строка), значит притащили из проводника
-            #     if isinstance(src_data, str): 
-            #         insert_into_queue_db(src_data, target_id)
-                
-            #     # Если data - это ID (число), значит двигаем внутри очереди
-            #     elif isinstance(src_data, int): 
-            #         reorder_queue_db(src_data, target_id)
+            def on_accept(e):
+                # 1. Получаем контролы и их данные (track_id)
+                src_control = page.get_control(e.src_id) # Элемент, который тащим
+                src_id = src_control.data                # ID перетаскиваемого трека
+                target_id = e.control.data               # ID трека, на который бросили
+                # Если бросили сами на себя — ничего не делаем
+                if src_id == target_id:
+                    return
+
+                # --- 2. ОБНОВЛЕНИЕ БАЗЫ ДАННЫХ (ГИБРИДНАЯ ЛОГИКА) ---
+                con_queue = sqlite3.connect('queue.db')
+                cursor = con_queue.cursor()
+                try:
+                    if target_id == 0:
+                        # ВЕТКА А: Бросили на 0 место (Вставка со сдвигом вниз)
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
+                        # Сдвигаем все треки от 0 до бывшего места перетаскиваемого трека на +1
+                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_id,))
+                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
+                        con_queue.commit()
+
+                        # Запускаем трек, так как он стал нулевым
+                        cursor.execute("SELECT path FROM queue WHERE id = 0")
+                        path_row = cursor.fetchone()
+                        if path_row:
+                            ui_utils.load_track(page, path_row[0], play_btn, 0)
+
+                    else:
+                        # ВЕТКА Б: Бросили на любое другое место (Обычный Swap)
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_id, target_id))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_id,))
+                        con_queue.commit()
+
+                        # Если мы утащили сам нулевой трек вниз, на его место (0) встал другой трек
+                        # Его тоже нужно включить
+                        if src_id == 0:
+                            cursor.execute("SELECT path FROM queue WHERE id = 0")
+                            path_row = cursor.fetchone()
+                            if path_row:
+                                ui_utils.load_track(page, path_row[0], play_btn, 0)
+
+                except Exception as ex:
+                    print(f"Ошибка БД при перетаскивании: {ex}")
+                    con_queue.rollback()
+                    return # Прерываем UI-обновление при ошибке
+                finally:
+                    con_queue.close()
+
+                # --- 3. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА ---
+                src_index = None
+                target_index = None
+
+                for i, ctrl in enumerate(queue_list.controls):
+                    if ctrl.data == src_id:
+                        src_index = i
+                    elif ctrl.data == target_id:
+                        target_index = i
+
+                if src_index is not None and target_index is not None:
                     
-            #     # Перестраиваем UI после изменения БД
-            #     rebuild_queue_ui(page, queue_container)
+                    if target_id == 0:
+                        # ВЕТКА А (UI): Вырезаем элемент и вставляем в начало списка
+                        moved_control = queue_list.controls.pop(src_index)
+                        queue_list.controls.insert(0, moved_control)
+                    else:
+                        # ВЕТКА Б (UI): Меняем элементы местами 1 к 1
+                        queue_list.controls[src_index], queue_list.controls[target_index] = \
+                            queue_list.controls[target_index], queue_list.controls[src_index]
+
+                    # --- 4. ОБНОВЛЕНИЕ СКРЫТЫХ ID И ВИЗУАЛА ---
+                    for i, ctrl in enumerate(queue_list.controls):
+                        ctrl.data = i                  # Обновляем ID для DragTarget
+                        ctrl.content.data = i          # Обновляем ID для вложенного Draggable
+                        ctrl.content.content.data = i  # Обновляем ID для клика
+
+                        # Применяем зеленое выделение только к нулевому треку
+                        is_playing = (i == 0)
+                        border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
+                        bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
+                        
+                        ctrl.content.content.border = ft.Border.all(2, border_color)
+                        ctrl.content.content.bgcolor = bg_color
+                    
+                    queue_list.update()
 
             # 3. Визуальный отклик при взаимодействии
             def on_will_accept(e):
-                #e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE)
+                e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
                 e.control.update()
 
             def on_leave(e):
-                # Возвращаем стандартную рамку
-                # border_col = ft.Colors.GREEN if e.control.data == 0 else ft.Colors.TRANSPARENT
-                # e.control.content.content.border = ft.Border.all(2, border_col)
+                is_playing_now = (e.control.data == 0)
+                border_col = ft.Colors.GREEN if is_playing_now else ft.Colors.TRANSPARENT
+                e.control.content.content.border = ft.Border.all(2, border_col)
                 e.control.update()
 
             # 4. Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
             drag_item = ft.DragTarget(
                 group="queue_drag", # ВАЖНО: Общая группа с проводником
                 data=track_id, # Сохраняем target_id в данных таргета для on_leave
-                #on_accept=on_accept,
+                on_accept=on_accept,
                 on_will_accept=on_will_accept,
                 on_leave=on_leave,
                 content=ft.Draggable(
