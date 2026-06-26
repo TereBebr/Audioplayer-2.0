@@ -474,7 +474,7 @@ def App(page: ft.Page):
     end_time_label = ft.Text("00:00", size=text_size, color="white", font_family="Arial")
     
     main_slider = ft.Slider( 
-        expand=3,
+        #expand=3,
         thumb_color=ft.Colors.INDIGO_800,
         min=0, 
         max=100,
@@ -482,6 +482,8 @@ def App(page: ft.Page):
         on_change=lambda e: ui_utils.slider_on_dragging(e,start_time_label),   
         on_change_end=lambda e: ui_utils.slider_event(e, start_time_label),
     )
+
+    vol_label = ft.Text("23", size=text_size, color="white", font_family="Arial")
 
     track_cover = ft.Image(
     src="https://flet.dev/img/logo.svg",
@@ -653,7 +655,7 @@ def App(page: ft.Page):
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 controls=[
                                                     ft.Container( # кнопки кправления
-                                                        expand=2,
+                                                        #expand=2,
                                                         bgcolor=ft.Colors.RED_900, 
                                                         alignment=ft.Alignment.BOTTOM_CENTER,
                                                         content=ft.Row(
@@ -696,10 +698,41 @@ def App(page: ft.Page):
                                             bgcolor=ft.Colors.RED_800, 
                                             expand=4, #1/4
                                             content=ft.Column(
-                                                spacing=15,
-                                                alignment=ft.MainAxisAlignment.CENTER,
+                                                spacing=5,
                                                 controls=[
-                                                    ft.Text("кнопки", size=text_size, color="white"),
+                                                    ft.Container(
+                                                        bgcolor=ft.Colors.RED_900, 
+                                                        expand=4,
+                                                    ),
+                                                    ft.Container(
+                                                        bgcolor=ft.Colors.RED_900, 
+                                                        expand=3,
+                                                        content=ft.Row(
+                                                            spacing=0,
+                                                            controls=[
+                                                                ft.Container(
+                                                                    padding=0,
+                                                                    expand=6,
+                                                                    content=ft.Slider(
+                                                                        thumb_color=ft.Colors.INDIGO_800,
+                                                                        min=0,
+                                                                        max=100,
+                                                                        value=0,
+                                                                        on_change_end=lambda e: ui_utils.vol_slider_event(e,vol_label)
+                                                                    ),
+                                                                ),
+                                                                ft.Container(
+                                                                    bgcolor=ft.Colors.RED_900,
+                                                                    expand=1,
+                                                                    content = vol_label
+                                                                )
+                                                            ]
+                                                        )
+                                                    ),
+                                                    ft.Container(
+                                                        bgcolor=ft.Colors.RED_900, 
+                                                        expand=4,
+                                                    )
                                                 ]
                                             )
                                         ),

@@ -251,14 +251,25 @@ def slider_on_dragging(e: ft.ControlEvent, time_label): #чтоб не дерг�
 
 def slider_event(e: ft.ControlEvent, time_label):
     global curr_sec, is_dragging
-    sec = int(e.control.value)
-    player.set_time(sec * 1000)
+    if player:
+        sec = int(e.control.value)
+        player.set_time(sec * 1000)
 
-    time_label.value = f"{sec // 60:02d}:{sec % 60:02d}"
-    time_label.update()
+        time_label.value = f"{sec // 60:02d}:{sec % 60:02d}"
+        time_label.update()
 
-    curr_sec = sec
+        curr_sec = sec
+    else:
+        print("!player")
     is_dragging = False
+
+def vol_slider_event(e, vol_label):
+    if player:
+        vol_label.value = int(e.control.value)
+        vol_label.update()
+        player.audio_set_volume(int(e.control.value))
+    else:
+        print("!player")
 
 #Логика воспроизведение аудио ----
 
