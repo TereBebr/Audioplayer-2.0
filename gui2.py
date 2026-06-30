@@ -104,8 +104,9 @@ def App(page: ft.Page):
                 full_item_path = str(Path(item["path"]))
                 explorer_tree.controls.append(
                     ft.Draggable(
+                        group="queue_drag",
                         data=item["path"], 
-                        content=ft.ContextMenu( # ТЕПЕРЬ МЕНЮ ЕСТЬ И У ФАЙЛОВ!
+                        content=ft.ContextMenu(
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: (
                                     ui_utils.add_queue(p), 
@@ -255,11 +256,32 @@ def App(page: ft.Page):
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
             def on_accept(e):
-                # 1. Получаем контролы и их данные (track_id)
                 src_control = page.get_control(e.src_id) # Элемент, который тащим
+
+                src_data = src_control.data      # Это либо ID трека (int), либо путь (str)
+                target_id = e.control.data # Если бросили сами на себя — ничего не делаем
+
+                if isinstance(src_data, str):
+                    # Вызываем обновленную функцию добавления, указывая куда вставить
+                    ui_utils.add_queue(src_data, insert_at=target_id)
+                    
+                    # Если папку/файл бросили прямо на место играющего трека (id 0),
+                    # имеет смысл сразу запустить первый трек из этой папки
+                    if target_id == 0:
+                        con_q = sqlite3.connect('queue.db')
+                        cur = con_q.cursor()
+                        cur.execute("SELECT path FROM queue WHERE id = 0")
+                        new_track = cur.fetchone()
+                        con_q.close()
+                        if new_track:
+                            ui_utils.load_track(page, new_track[0], play_btn, 0)
+                            
+                    # Полностью перерисовываем очередь (БД уже обновилась)
+                    rebuild_queue_ui()
+                    return # Прерываем функцию, чтобы не сработала логика ниже
+
+
                 src_id = src_control.data                # ID перетаскиваемого трека
-                target_id = e.control.data               # ID трека, на который бросили
-                # Если бросили сами на себя — ничего не делаем
                 if src_id == target_id:
                     return
 

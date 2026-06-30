@@ -343,7 +343,7 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
     else:
         print("В очереди нет треков для воспроизведения")
 
-def add_queue(p): #добавление в конец очереди файла, папки + подпапок
+def add_queue(p, insert_at=None): # <--- Добавили аргумент insert_at
     path = Path(p)
     files_to_add = []
 
@@ -361,11 +361,20 @@ def add_queue(p): #добавление в конец очереди файла,
 
     con_queue = sqlite3.connect('queue.db')
     cursor = con_queue.cursor()
-
-    cursor.execute("SELECT MAX(id) FROM queue")
-    last_id = cursor.fetchone()[0] or 0 # Если таблица пустая, получим -1 ##изменил на 0
     
     try:
+        if insert_at is None:
+            # Обычное добавление в конец
+            cursor.execute("SELECT MAX(id) FROM queue")
+            max_id = cursor.fetchone()[0]
+            start_id = 0 if max_id is None else max_id + 1
+        else:
+            # Вставка по индексу: сдвигаем все элементы вниз на количество новых файлов
+            num_files = len(files_to_add)
+            cursor.execute("UPDATE queue SET id = id + ? WHERE id >= ?", (num_files, insert_at))
+            start_id = insert_at
+            
+        current_id = start_id
         for obj in files_to_add:
             try:
                 audio = mutagen.File(obj)
@@ -373,15 +382,18 @@ def add_queue(p): #добавление в конец очереди файла,
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
                 miniature = extract_cover_bytes(obj)
-                last_id += 1
 
                 cursor.execute(
                     "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                    (last_id, name, author, str(obj), miniature))
+                    (current_id, name, author, str(obj), miniature))
+                current_id += 1
             except Exception as e:
                 print(f"Ошибка чтения файла {obj}: {e}")
         
         con_queue.commit()
+    except Exception as e:
+        print(f"Ошибка БД при добавлении в очередь: {e}")
+        con_queue.rollback()
     finally:
         con_queue.close()
         print(f"Добавлено {len(files_to_add)} файлов.")
