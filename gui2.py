@@ -15,10 +15,29 @@ folder_items = ui_utils.fnew_path(p) #обработчик для начальн
 import configparser
 config = configparser.ConfigParser()
 config.read('config.txt', encoding='utf-8')
+# Конфиги =========
+start_vol_val = config.getint('Main Settings', 'start_vol_val')
+# =================
 
-text_size = config.getint('UI Settings', 'text_size') # рекомендуемое значение 13
-b_radius = config.getint('UI Settings', 'b_radius') #закругление ui c: 20
+config.read('ui_config.txt', encoding='utf-8')
+
 radius = config.getint('UI Settings', 'radius') # закругление картинки c: 8
+text_size = config.getint('UI Settings', 'text_size') # рекомендуемое значение 13
+
+# Конфиги UBOX =========
+UBOX_b_radius = config.getint('UBOX Settings', 'b_radius') #закругление UBOX ui рамки c: 20
+
+# Конфиги LBOX =========
+LBOX_b_radius = config.getint('LBOX Settings', 'b_radius') #закругление LBOX ui рамки c: 20
+
+# Конфиги CBOX =========
+CBOX_b_radius = config.getint('CBOX Settings', 'b_radius') #закругление CBOX ui рамки c: 20
+
+# Конфиги RBOX =========
+RBOX_b_radius = config.getint('RBOX Settings', 'b_radius') #закругление RBOX ui рамки c: 20
+
+# Конфиги DBOX =========
+DBOX_b_radius = config.getint('DBOX Settings', 'b_radius') #закругление DBOX ui рамки c: 20
 
 # Конфиги adress_bar =========
 adress_barBGCol = config.get('UI adress_bar', 'adress_barBGCol') # Цвет фона строки
@@ -46,7 +65,6 @@ queue_border_radius = 8
 k = 0.7
 queue_cell = ((46 * k + 8.2), (12 * k + 5.4), (12 * k + 2.4), (4 * k - 1.2), (15 * k - 4), (76 * k + 4.2))
 # ============================
-start_vol_val = config.getint('Main Settings', 'start_vol_val')
 
 
 def App(page: ft.Page):
@@ -440,7 +458,7 @@ def App(page: ft.Page):
         ]),
         expand=True,
         padding=10,
-        border_radius=b_radius,
+        border_radius=RBOX_b_radius,
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
     )
     skip_track_with_animation(page, queue_list, rebuild_queue_ui, 0)
@@ -538,7 +556,7 @@ def App(page: ft.Page):
                                 ft.Container(
                                 height=100,
                                 bgcolor=ft.Colors.RED,
-                                border_radius=b_radius,
+                                border_radius=UBOX_b_radius,
                                 padding=5,
                                 expand=1,
                                 content=ft.Row(
@@ -558,7 +576,7 @@ def App(page: ft.Page):
                             expand=True,
                             controls=[
                                 ft.Container( # LBOX (Левая панель / Проводник)
-                                    border_radius=b_radius, 
+                                    border_radius=LBOX_b_radius, 
                                     padding=5,
                                     expand=2,
 
@@ -601,7 +619,7 @@ def App(page: ft.Page):
                                     )
                                 ),               
                                 ft.Container( #CBOX
-                                    border_radius=b_radius, 
+                                    border_radius=CBOX_b_radius, 
                                     padding=5, 
                                     expand=5,
 
@@ -615,7 +633,7 @@ def App(page: ft.Page):
                                 
                                 ft.Container( #RBOX
                                     #bgcolor=ft.Colors.RED_800, 
-                                    border_radius=b_radius, 
+                                    border_radius=RBOX_b_radius, 
                                     padding=5, 
                                     expand=2,
                                     
@@ -636,7 +654,7 @@ def App(page: ft.Page):
                                 height=150,
                                 bgcolor=ft.Colors.RED, 
                                 expand=1,
-                                border_radius=b_radius, 
+                                border_radius=DBOX_b_radius, 
                                 content=ft.Row(
                                     spacing=10, # Расстояние между элементами внутри
                                     controls=[
