@@ -46,6 +46,8 @@ queue_border_radius = 8
 k = 0.7
 queue_cell = ((46 * k + 8.2), (12 * k + 5.4), (12 * k + 2.4), (4 * k - 1.2), (15 * k - 4), (76 * k + 4.2))
 # ============================
+start_vol_val = config.getint('Main Settings', 'start_vol_val')
+
 
 def App(page: ft.Page):
     page.title = "App"
@@ -505,7 +507,7 @@ def App(page: ft.Page):
         on_change_end=lambda e: ui_utils.slider_event(e, start_time_label),
     )
 
-    vol_label = ft.Text("23", size=text_size, color="white", font_family="Arial")
+    vol_label = ft.Text(str(start_vol_val), size=text_size, color="white", font_family="Arial")
 
     track_cover = ft.Image(
     src="https://flet.dev/img/logo.svg",
@@ -739,7 +741,7 @@ def App(page: ft.Page):
                                                                         thumb_color=ft.Colors.INDIGO_800,
                                                                         min=0,
                                                                         max=100,
-                                                                        value=0,
+                                                                        value=start_vol_val,
                                                                         on_change_end=lambda e: ui_utils.vol_slider_event(e,vol_label)
                                                                     ),
                                                                 ),

@@ -34,6 +34,7 @@ upd_time = config.getfloat('Main Settings', 'upd_time') # Время обнов�
 autoplayswitch = config.getboolean('Main Settings', 'autoplayswitch') # Автопауза при смене трека
 idxDirrs = config.getboolean('Main Settings', 'idxDirrs') # если True читает все подпапки во время добавления в очередь папки, если False, только то что внутри папки
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
+start_vol_val = config.getint('Main Settings', 'start_vol_val')
 
 
 #Системные функции ----
@@ -291,7 +292,7 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
             is_paused = False
         play_btn_obj.update()
     else:
-        player = utils.create_player(p)
+        player = utils.create_player(p, start_vol_val)
         time.sleep(0.5)
         #vol_slider.set(self.player.audio_get_volume())
         #vol_label.configure(text=f"{self.player.audio_get_volume()}%")
