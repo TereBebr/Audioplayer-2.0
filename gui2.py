@@ -528,10 +528,10 @@ def App(page: ft.Page):
     vol_label = ft.Text(str(start_vol_val), size=text_size, color="white", font_family="Arial")
 
     track_cover = ft.Image(
-    src="https://flet.dev/img/logo.svg",
-    width=150,
-    height=150,
-    border_radius=ft.BorderRadius.all(radius),
+        src="https://flet.dev/img/logo.svg",
+        width=150,
+        height=150,
+        border_radius=ft.BorderRadius.all(radius),
     )
 
     rebuild_explorer(folder_items, p)
@@ -554,7 +554,7 @@ def App(page: ft.Page):
                         ft.Row(
                             controls=[
                                 ft.Container(
-                                height=100,
+                                height=50,
                                 bgcolor=ft.Colors.RED,
                                 border_radius=UBOX_b_radius,
                                 padding=5,
@@ -628,7 +628,66 @@ def App(page: ft.Page):
                                     border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
                                     blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
 
-                                    #content=ft.ElevatedButton(content=ft.Text("Нажми меня"), on_click=lambda e: print("Кнопка нажата!"))
+                                    content=ft.Column(
+                                        spacing = 5,
+                                        controls=[
+                                            ft.Container( # Верхняя строка - название плейлиста, картинка и кнопка play
+                                                # expand=3,
+                                                height=100,
+                                                bgcolor=ft.Colors.RED_800,
+                                                content=ft.Row(
+                                                    #expand=True,
+                                                    #spacing=10,
+                                                    controls=[
+                                                        ft.Container(
+                                                            height=100,
+                                                            width=100,
+                                                            bgcolor=ft.Colors.BLACK
+                                                        ),
+                                                        ft.Column(
+                                                            expand=4,
+                                                            spacing=3,
+                                                            controls=[
+                                                                ft.Container(
+                                                                    bgcolor=ft.Colors.RED_900,
+                                                                    content=ft.Text("Название плейлиста", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
+                                                                ),
+                                                                ft.Container(
+                                                                    bgcolor=ft.Colors.RED_900,
+                                                                    content=ft.Text("Текст", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,),
+                                                                )
+                                                            ]
+                                                        ),
+                                                        ft.Container( #кнопка play
+                                                            expand=1,
+                                                            content = ft.Image(
+                                                                src="assets/icons/play_ico_inac.png",
+                                                                width=30,
+                                                                height=30,
+                                                                fit="contain",
+                                                            ),
+                                                            alignment=ft.Alignment.BOTTOM_RIGHT,
+                                                            shape = ft.BoxShape.CIRCLE,
+                                                            animate=200,
+                                                            scale=1.0,  # Изначальный размер (100%)
+                                                            animate_scale=ft.Animation(100, ft.AnimationCurve.EASE_OUT), # Анимация сжатия за 100мс
+
+                                                            # on_hover=ui_utils.change_color,
+                                                            # on_click = lambda e: ui_utils.playpause_btn_ev(e, play_btn),
+                                                        ),
+                                                    ]
+                                                )
+                                            ),
+                                            ft.Container( # список плейлистов
+                                                height=50,
+                                                bgcolor=ft.Colors.RED_900,
+                                            ),
+                                            ft.Container( # рабочая зона
+                                                expand=True,
+                                                bgcolor=ft.Colors.RED_800,
+                                            ),
+                                        ]
+                                    )
                                 ),
                                 
                                 ft.Container( #RBOX
