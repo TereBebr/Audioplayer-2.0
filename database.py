@@ -21,24 +21,38 @@ def pl_app():
     con_fav = sqlite3.connect('app.db')
     cursor = con_fav.cursor()
 
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS "tracks" (
-	"id"	INTEGER NOT NULL UNIQUE,
-	"name"	TEXT NOT NULL,
-	"author"	TEXT,
-	"path"	TEXT NOT NULL,
-	"cov_bytes"	BLOB,
-	"seed"	INTEGER NOT NULL,
-	"reps"	INTEGER
-    ); ''')
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS "playlists" (
-	"pl_id"	INTEGER NOT NULL,
-	"pl_name"	TEXT NOT NULL,
-	"pl_cover_path"	TEXT,
-	PRIMARY KEY("pl_id")
-    ); ''')
-	
+    # 1. Таблица треков
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        author TEXT,
+        path TEXT NOT NULL,
+        cov_bytes BLOB,
+        reps INTEGER
+    )""")
+
+    # 2. Таблица плейлистов
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        cover_path TEXT
+    )""")
+
+    # 3. Связующая таблица
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+        playlist_id INTEGER,
+        track_id INTEGER,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, track_id), -- Автоматически создает индекс
+        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+        FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    )""")
+    # Явное включение поддержки Foreign Keys в SQLite (обязательно!)
+    cursor.execute("PRAGMA foreign_keys = ON;")
+
     con_fav.commit()
     con_fav.close()
     print("app.db инициализирована")
