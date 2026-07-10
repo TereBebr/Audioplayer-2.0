@@ -534,13 +534,33 @@ def App(page: ft.Page):
         border_radius=ft.BorderRadius.all(radius),
     )
 
+    images1 = [
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+        "assets/textures/BG.jpg",
+    ]
+
     rebuild_explorer(folder_items, p)
     # UI ------------------------
     page.add(
         ft.Container( #задний фон
             expand=True, 
             image=ft.DecorationImage( #фоновая картинка
-                #src="assets/textures/BG.jpg",
+                # src="assets/textures/BG.jpg",
                 fit="cover"
             ),
 
@@ -678,9 +698,26 @@ def App(page: ft.Page):
                                                     ]
                                                 )
                                             ),
-                                            ft.Container( # список плейлистов
+                                            ft.Container(
                                                 height=50,
                                                 bgcolor=ft.Colors.RED_900,
+                                                content=ft.Row(
+                                                    scroll=ft.ScrollMode.HIDDEN,
+                                                    spacing=2,
+                                                    controls=[
+                                                        ft.Container(
+                                                            content=ft.Image(
+                                                                src=i,
+                                                                width=50,
+                                                                height=50,
+                                                                fit="cover"
+                                                            ),
+                                                            on_click=lambda e, playlist_url=i: print(f"Выбрана обложка: {playlist_url}"),
+                                                            ink=True, # Включает анимацию нажатия
+                                                            border_radius=5,
+                                                        ) for i in images1
+                                                    ]
+                                                )
                                             ),
                                             ft.Container( # рабочая зона
                                                 expand=True,
