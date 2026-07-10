@@ -106,8 +106,15 @@ def get_audio_tags(audio, file_name):
     return {k: str(v) for k, v in tags.items()}
 
 def create_player(path, start_vol_val):
-    # 1. Создаем экземпляр с параметрами (например, отключаем видео)
-    instance = vlc.Instance('--no-video', '--quiet')
+    # 1. Создаем экземпляр с параметрами    
+    vlc_args = [
+        '--no-video', 
+        '--quiet',
+        '--audio-filter=normvol',
+        '--norm-max-level=2.0' 
+    ]
+    instance = vlc.Instance(*vlc_args)
+
     media_list = instance.media_list_new()
     # 2. Создаем плеер
     player = instance.media_player_new()
