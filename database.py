@@ -18,8 +18,8 @@ def create_queue():
     print("queue.db инициализирована")
 
 def pl_app():
-    con_fav = sqlite3.connect('app.db')
-    cursor = con_fav.cursor()
+    con_app = sqlite3.connect('app.db')
+    cursor = con_app.cursor()
 
     # 1. Таблица треков
     cursor.execute("""
@@ -36,7 +36,7 @@ def pl_app():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS playlists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE,
         cover_path TEXT
     )""")
 
@@ -53,6 +53,15 @@ def pl_app():
     # Явное включение поддержки Foreign Keys в SQLite (обязательно!)
     cursor.execute("PRAGMA foreign_keys = ON;")
 
-    con_fav.commit()
-    con_fav.close()
+    try:
+        # Избранное
+        cursor.execute(
+            "INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",("Избранное","storage/playlists_covers/favorite.png"))
+    except Exception as e:
+        con_app.rollback()
+        print(f"Ошибка при создании плейлиста: {e}")
+        return -1
+
+    con_app.commit()
+    con_app.close()
     print("app.db инициализирована")

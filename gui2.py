@@ -132,8 +132,14 @@ def App(page: ft.Page):
                                     ui_utils.add_queue(p), 
                                     rebuild_queue_ui()
                                 )),
-                                ft.PopupMenuItem(content=ft.Text("Вставить"), on_click=lambda _: print("Вставляем...")),
-                                ft.PopupMenuItem(content=ft.Text("Удалить"), on_click=lambda _: print("Удаляем...")),
+                                ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
+                                    # ui_utils.add_favorite(p), 
+                                    # rebuild_favorite_ui()
+                                )),
+                                ft.PopupMenuItem(content=ft.Text("Добавить в альбрм"), on_click=lambda e, p=full_item_path: (
+                                    # ui_utils.add_playlist(p), 
+                                    # rebuild_playlist_ui()
+                                )),
                             ],
                         content=ft.GestureDetector(
                             data=item["path"],
@@ -534,25 +540,28 @@ def App(page: ft.Page):
         border_radius=ft.BorderRadius.all(radius),
     )
 
-    images1 = [
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-        "assets/textures/BG.jpg",
-    ]
+    def rebuild_playlists():
+        con_app = sqlite3.connect('app.db')
+        cursor = con_app.cursor()
+
+        try:
+            cursor.execute("SELECT name, cover_path FROM playlists")        
+            results = cursor.fetchall()
+            
+            names = []
+            covers = []        
+            for row in results:
+                names.append(row[0])
+                covers.append(row[1])
+            return names, covers
+        
+        except sqlite3.OperationalError as e:
+            print(f"Ошибка БД: app #01")
+            return []
+        finally:
+            con_app.close()
+
+    playlist_names, playlist_images = rebuild_playlists()
 
     rebuild_explorer(folder_items, p)
     # UI ------------------------
@@ -712,10 +721,10 @@ def App(page: ft.Page):
                                                                 height=50,
                                                                 fit="cover"
                                                             ),
-                                                            on_click=lambda e, playlist_url=i: print(f"Выбрана обложка: {playlist_url}"),
-                                                            ink=True, # Включает анимацию нажатия
+                                                            on_click=lambda e, : print(f"Выбран альбом: {j}"),
+                                                            # ink=True, # Включает анимацию нажатия
                                                             border_radius=5,
-                                                        ) for i in images1
+                                                        ) for i in playlist_images for j in playlist_names
                                                     ]
                                                 )
                                             ),

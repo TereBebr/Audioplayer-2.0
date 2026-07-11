@@ -400,6 +400,96 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
         print(f"Добавлено {len(files_to_add)} файлов.")
 
 #----
+# Плейлисты ----
+
+def add_track_to_playlist(cursor, playlist_id, track_id, insert_at=None):
+    if insert_at is None:
+        # Добавляем в конец плейлиста
+        cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+        last_pos = cursor.fetchone()[0] or 0
+        new_position = last_pos + 1
+    else:
+        # Вставка по индексу: сдвигаем ПОЗИЦИИ (position) в плейлисте, а не ID треков!
+        cursor.execute("""
+            UPDATE playlist_tracks 
+            SET position = position + 1 
+            WHERE playlist_id = ? AND position >= ?
+        """, (playlist_id, insert_at))
+        new_position = insert_at
+
+    # Добавляем трек в плейлист. 
+    # Используем IGNORE, чтобы не добавить один и тот же трек в Избранное дважды
+    cursor.execute("""
+        INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+        VALUES (?, ?, ?)
+    """, (playlist_id, track_id, new_position))
+
+
+def add_favorite(p, insert_at=None):
+    path = Path(p)
+    files_to_add = []
+
+    if path.is_dir():
+        pattern = path.rglob('*') if idxDirrs else path.iterdir()
+        for obj in pattern:
+            if obj.is_file() and obj.suffix.lower() in SUPPORTED_FORMATS:
+                files_to_add.append(obj)
+    elif path.is_file():
+        if path.suffix.lower() in SUPPORTED_FORMATS:
+            files_to_add.append(path)
+
+    if not files_to_add:
+        return
+
+    # ID плейлиста "Избранное". Убедитесь, что плейлист с ID=0 существует в таблице playlists!
+    FAVORITE_PLAYLIST_ID = 0 
+    
+    con_queue = sqlite3.connect('app.db')
+    cursor = con_queue.cursor()
+    
+    try:
+        current_insert_pos = insert_at
+
+        for obj in files_to_add:
+            try:
+                audio = mutagen.File(obj)
+                tags = utils.get_audio_tags(audio, obj.stem)
+                name = tags["Название"] if tags.get("Название") else obj.name
+                author = tags.get("Автор", "Неизвестно")
+                miniature = extract_cover_bytes(obj) # Рекомендую в будущем перевести на файловую систему
+                file_path_str = str(obj)
+                
+                # 1. Добавляем трек в общую базу (если его там еще нет). Без передачи ID!
+                cursor.execute("""
+                    INSERT OR IGNORE INTO tracks (name, author, path, cov_bytes) 
+                    VALUES (?, ?, ?, ?)
+                """, (name, author, file_path_str, miniature))
+                
+                # 2. Получаем НАСТОЯЩИЙ ID этого трека из базы (неважно, новый он или уже был)
+                cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))
+                track_id = cursor.fetchone()[0]
+                
+                # 3. Привязываем трек к плейлисту "Избранное"
+                add_track_to_playlist(cursor, FAVORITE_PLAYLIST_ID, track_id, current_insert_pos)
+                
+                # Если вставляем по индексу, каждый следующий файл встает за предыдущим
+                if current_insert_pos is not None:
+                    current_insert_pos += 1
+                    
+            except Exception as e:
+                print(f"Ошибка чтения файла {obj}: {e}")
+        
+        con_queue.commit()
+        print(f"Добавлено {len(files_to_add)} файлов в Избранное.")
+        
+    except Exception as e:
+        print(f"Ошибка БД при добавлении в Избранное: {e}")
+        con_queue.rollback()
+    finally:
+        con_queue.close()
+
+
+#----
 
 def bg_ui_process(page: ft.Page, play_btn):
     """Функция, которая будет крутиться в фоне и генерировать данные"""
