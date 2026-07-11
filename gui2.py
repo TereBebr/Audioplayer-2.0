@@ -133,7 +133,7 @@ def App(page: ft.Page):
                                     rebuild_queue_ui()
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
-                                    # ui_utils.add_favorite(p), 
+                                    ui_utils.add_favorite(p), 
                                     # rebuild_favorite_ui()
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в альбрм"), on_click=lambda e, p=full_item_path: (
