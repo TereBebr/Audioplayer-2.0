@@ -514,17 +514,20 @@ def bg_ui_process(page: ft.Page, play_btn):
                 elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
                     con_queue = sqlite3.connect('queue.db')
                     cursor = con_queue.cursor()
-                    cursor.execute("UPDATE queue SET id = id -1")
-                    cursor.execute("SELECT path FROM queue WHERE id = 0")
-                    r = cursor.fetchone()                        
-                    con_queue.commit()
-                    con_queue.close()
-                    
+                    cursor.execute("SELECT path FROM queue WHERE id = 1")
+                    r = cursor.fetchone()
                     if r:
+                        cursor.execute("UPDATE queue SET id = id -1")
+                        con_queue.commit()
+                        con_queue.close()
                         real_path = r[0]
                         curr_sec = 0
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
+                    else: #все закончилось 
+                        con_queue.commit()
+                        con_queue.close()
+                        pass
                 
             time.sleep(upd_time)
     threading.Thread(target=run, daemon=True).start()

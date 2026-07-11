@@ -50,8 +50,7 @@ if __name__ == "__main__":
     
     database.create_queue()
     database.pl_app()
-
-    
+ 
     # file_path, file_name, full_path = utils.import_paths(base_dir,file_name)
     # audio = mutagen.File(full_path)
     # tec_audio_info_num = utils.tec_info(full_path, audio)
