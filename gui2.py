@@ -283,10 +283,10 @@ def App(page: ft.Page):
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
             def on_accept(e):
                 src_control = page.get_control(e.src_id) # Элемент, который тащим
-
+                if src_control is None:
+                    return
                 src_data = src_control.data      # Это либо ID трека (int), либо путь (str)
                 target_id = e.control.data # Если бросили сами на себя — ничего не делаем
-
                 if isinstance(src_data, str):
                     # Вызываем обновленную функцию добавления, указывая куда вставить
                     ui_utils.add_queue(src_data, insert_at=target_id)
@@ -458,7 +458,7 @@ def App(page: ft.Page):
 
     queue_panel = ft.Container(
         content=ft.Column([
-            #ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
+            ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
             ft.Divider(),
             queue_list
         ]),

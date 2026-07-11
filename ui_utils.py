@@ -524,7 +524,7 @@ def bg_ui_process(page: ft.Page, play_btn):
                         curr_sec = 0
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
-                    else: #все закончилось 
+                    else: #все кончилось включая очередь
                         con_queue.commit()
                         con_queue.close()
                         pass
