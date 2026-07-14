@@ -564,6 +564,97 @@ def App(page: ft.Page):
     playlist_names, playlist_images = rebuild_playlists()
 
     rebuild_explorer(folder_items, p)
+
+    switch_playlists_WZ_view =ft.Container(
+        bgcolor=ft.Colors.RED_900,
+        expand=True,
+        content=ft.Column(
+            spacing = 5,
+            controls=[
+                ft.Container( # Верхняя строка - название плейлиста, картинка и кнопка play
+                    # expand=3,
+                    height=100,
+                    bgcolor=ft.Colors.RED_800,
+                    content=ft.Row(
+                        #expand=True,
+                        #spacing=10,
+                        controls=[
+                            ft.Container(
+                                height=100,
+                                width=100,
+                                bgcolor=ft.Colors.BLACK
+                            ),
+                            ft.Column(
+                                expand=4,
+                                spacing=3,
+                                controls=[
+                                    ft.Container(
+                                        bgcolor=ft.Colors.RED_700,
+                                        content=ft.Text("Название плейлиста", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
+                                    ),
+                                    ft.Container(
+                                        bgcolor=ft.Colors.RED_600,
+                                        content=ft.Text("Текст", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,),
+                                    )
+                                ]
+                            ),
+                            ft.Container( #кнопка play
+                                expand=1,
+                                content = ft.Image(
+                                    src="assets/icons/play_ico_inac.png",
+                                    width=30,
+                                    height=30,
+                                    fit="contain",
+                                ),
+                                alignment=ft.Alignment.BOTTOM_RIGHT,
+                                shape = ft.BoxShape.CIRCLE,
+                                animate=200,
+                                scale=1.0,  # Изначальный размер (100%)
+                                animate_scale=ft.Animation(100, ft.AnimationCurve.EASE_OUT), # Анимация сжатия за 100мс
+
+                                # on_hover=ui_utils.change_color,
+                                # on_click = lambda e: ui_utils.playpause_btn_ev(e, play_btn),
+                            ),
+                        ]
+                    )
+                ),
+                ft.Container( # строка с альбомами 
+                    height=50,
+                    bgcolor=ft.Colors.RED_900,
+                    content=ft.Row(
+                        scroll=ft.ScrollMode.HIDDEN,
+                        spacing=2,
+                        controls=[
+                            ft.Container(
+                                content=ft.Image(
+                                    src=i,
+                                    width=50,
+                                    height=50,
+                                    fit="cover"
+                                ),
+                                on_click=lambda e, : print(f"Выбран альбом: {j}"),
+                                # ink=True, # Включает анимацию нажатия
+                                border_radius=5,
+                            ) for i in playlist_images for j in playlist_names
+                        ]
+                    )
+                ),
+                ft.Container( # рабочая зона
+                        expand=True,
+                        bgcolor=ft.Colors.RED_800,
+                    ),
+            ]
+        )
+    )
+    switch_online_WZ_view = ft.Container()
+
+    def on_change_WZ_view(e):
+        switch_playlists_WZ_view.visible = (e.control.selected_index == 0)
+        switch_online_WZ_view.visible = (e.control.selected_index == 1)
+        # Обновляем оба контейнера (или их общего родителя)
+        switch_playlists_WZ_view.update()
+        switch_online_WZ_view.update()
+    
     # UI ------------------------
     page.add(
         ft.Container( #задний фон
@@ -649,7 +740,6 @@ def App(page: ft.Page):
                                 ),               
                                 ft.Container( #CBOX
                                     border_radius=CBOX_b_radius, 
-                                    padding=5, 
                                     expand=5,
 
                                     #Стеклянный эффект
@@ -658,80 +748,25 @@ def App(page: ft.Page):
                                     blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
 
                                     content=ft.Column(
-                                        spacing = 5,
+                                        spacing=0,
                                         controls=[
-                                            ft.Container( # Верхняя строка - название плейлиста, картинка и кнопка play
-                                                # expand=3,
-                                                height=100,
-                                                bgcolor=ft.Colors.RED_800,
-                                                content=ft.Row(
-                                                    #expand=True,
-                                                    #spacing=10,
+                                            ft.Container( # режимы - плейлиты/онлайн
+                                                height=35,
+                                                width=float('inf'),
+                                                bgcolor=ft.Colors.RED_700,
+                                                content=ft.CupertinoSlidingSegmentedButton(
+                                                    selected_index=0,
+                                                    expand=True,
+                                                    proportional_width=True,
+                                                    on_change= on_change_WZ_view,
                                                     controls=[
-                                                        ft.Container(
-                                                            height=100,
-                                                            width=100,
-                                                            bgcolor=ft.Colors.BLACK
-                                                        ),
-                                                        ft.Column(
-                                                            expand=4,
-                                                            spacing=3,
-                                                            controls=[
-                                                                ft.Container(
-                                                                    bgcolor=ft.Colors.RED_900,
-                                                                    content=ft.Text("Название плейлиста", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
-                                                                ),
-                                                                ft.Container(
-                                                                    bgcolor=ft.Colors.RED_900,
-                                                                    content=ft.Text("Текст", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,),
-                                                                )
-                                                            ]
-                                                        ),
-                                                        ft.Container( #кнопка play
-                                                            expand=1,
-                                                            content = ft.Image(
-                                                                src="assets/icons/play_ico_inac.png",
-                                                                width=30,
-                                                                height=30,
-                                                                fit="contain",
-                                                            ),
-                                                            alignment=ft.Alignment.BOTTOM_RIGHT,
-                                                            shape = ft.BoxShape.CIRCLE,
-                                                            animate=200,
-                                                            scale=1.0,  # Изначальный размер (100%)
-                                                            animate_scale=ft.Animation(100, ft.AnimationCurve.EASE_OUT), # Анимация сжатия за 100мс
-
-                                                            # on_hover=ui_utils.change_color,
-                                                            # on_click = lambda e: ui_utils.playpause_btn_ev(e, play_btn),
-                                                        ),
-                                                    ]
+                                                        ft.Text("Свои плейлисты"),
+                                                        ft.Text("Онлайн функции"),
+                                                    ],
                                                 )
                                             ),
-                                            ft.Container(
-                                                height=50,
-                                                bgcolor=ft.Colors.RED_900,
-                                                content=ft.Row(
-                                                    scroll=ft.ScrollMode.HIDDEN,
-                                                    spacing=2,
-                                                    controls=[
-                                                        ft.Container(
-                                                            content=ft.Image(
-                                                                src=i,
-                                                                width=50,
-                                                                height=50,
-                                                                fit="cover"
-                                                            ),
-                                                            on_click=lambda e, : print(f"Выбран альбом: {j}"),
-                                                            # ink=True, # Включает анимацию нажатия
-                                                            border_radius=5,
-                                                        ) for i in playlist_images for j in playlist_names
-                                                    ]
-                                                )
-                                            ),
-                                            ft.Container( # рабочая зона
-                                                expand=True,
-                                                bgcolor=ft.Colors.RED_800,
-                                            ),
+                                            switch_playlists_WZ_view,
+                                            switch_online_WZ_view,
                                         ]
                                     )
                                 ),
