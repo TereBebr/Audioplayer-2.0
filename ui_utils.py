@@ -13,6 +13,7 @@ import time
 import io
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 import sqlite3
+import random
 
 player = None
 tags = None
@@ -398,6 +399,21 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
     finally:
         con_queue.close()
         print(f"Добавлено {len(files_to_add)} файлов.")
+
+def mix_queue(rebuild_queue):
+    con = sqlite3.connect('queue.db')
+    cursor = con.cursor()
+    cursor.execute("SELECT rowid, id FROM queue WHERE id > 0;")
+    rows = cursor.fetchall()
+    if rows:
+        rowids = [row[0] for row in rows]
+        ids = [row[1] for row in rows]
+        random.shuffle(ids)
+        # zip(ids, rowids) создаст пары вида (новый_id, старый_rowid)
+        cursor.executemany("UPDATE queue SET id = ? WHERE rowid = ?;", zip(ids, rowids))
+    con.commit()
+    con.close()
+    rebuild_queue()
 
 #----
 # Плейлисты ----

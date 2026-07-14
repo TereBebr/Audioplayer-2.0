@@ -455,10 +455,17 @@ def App(page: ft.Page):
             page.update()
             time.sleep(0.45)
         rebuild_callback()
-
+    
     queue_panel = ft.Container(
-        content=ft.Column([
-            ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
+        content=ft.Column(
+            spacing=0,
+            controls=[
+            # ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
+            ft.IconButton(
+                height=40,
+                icon=ft.Icon(ft.Icons.COMPARE_ARROWS,offset=ft.Offset(),color=adress_ButtonIconCol),
+                on_click=lambda e: ui_utils.mix_queue(rebuild_queue_ui),
+            ),
             ft.Divider(),
             queue_list
         ]),
