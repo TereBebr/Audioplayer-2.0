@@ -38,7 +38,6 @@ def tec_info(full_path,audio):
     #~~ ТЕХ ДАННЫЕ ФАЙЛА ~~
     if audio is None:
         return 0
-        print("Формат файла не поддерживается Mutagen")
     if full_path.lower().endswith(('.mp3', '.ogg', '.mp4')):
         #print("Формат тех. данных файла №1")
         return 1

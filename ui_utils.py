@@ -14,6 +14,8 @@ import io
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 import sqlite3
 import random
+from mutagen.flac import FLACNoHeaderError
+import subprocess
 
 player = None
 tags = None
@@ -78,7 +80,20 @@ def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
     # === ШАГ 1: Извлечение оригинальных байтов ===
     try:
         # mutagen.File автоматически определяет формат аудиофайла
-        audio = mutagen.File(path) 
+
+        try:
+            audio = mutagen.File(path)
+            if audio is None:
+                raise FLACNoHeaderError("Файл не распознан")
+        except (FLACNoHeaderError, Exception):
+            print(f"Попытка исправления файла: {path}")
+            audio = fix_and_load_flac(path)
+        
+        if audio:
+            print("Файл успешно открыт:", audio.get('title'))
+        # else:
+        #     print("Ошибка: файл не удалось открыть даже после исправления.")
+
         if audio is None:
             return None
 
@@ -149,6 +164,22 @@ def get_folder_content(folder_path: str | Path):#анализ текущей п�
 
     return folders + tracks
 
+def fix_and_load_flac(path):
+    """Пытается исправить заголовок через ffmpeg и прочитать файл."""
+    str_path = str(path)
+    fixed_path = str_path.replace(".flac", "_fixed.flac")
+    
+    # ffmpeg копирует поток в новый контейнер, исправляя структуру заголовка
+    cmd = ['ffmpeg', '-y', '-i', str_path, '-c:a', 'copy', fixed_path]
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        # После исправления пробуем прочитать уже новый файл
+        return mutagen.File(fixed_path, easy=True)
+    except Exception as e:
+        print(f"Не удалось исправить файл {path}: {e}")
+        return None
+
 def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на объект
         text = e.control.data
         p = Path(text).resolve()
@@ -158,7 +189,19 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             rebuild_callback(new_items, p)    # Вызываем функцию перерисовки UI
         else:
             #в 0 эл. очереди
-            audio = mutagen.File(p)
+            try:
+                audio = mutagen.File(p)
+                if audio is None:
+                    raise FLACNoHeaderError("Файл не распознан")
+            except (FLACNoHeaderError, Exception):
+                print(f"Попытка исправления файла: {p}")
+                audio = fix_and_load_flac(p)
+            
+            if audio:
+                print("Файл успешно открыт:", audio.get('title'))
+            # else:
+            #     print("Ошибка: файл не удалось открыть даже после исправления.")
+
             tags = utils.get_audio_tags(audio, p.stem)
             miniature = extract_cover_bytes(p)
 
@@ -280,7 +323,20 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
     curr_sec = 0
     total_sec = 0
     p = Path(path).resolve()
-    audio = mutagen.File(p)
+    
+    try:
+        audio = mutagen.File(p)
+        if audio is None:
+            raise FLACNoHeaderError("Файл не распознан")
+    except (FLACNoHeaderError, Exception):
+        print(f"Попытка исправления файла: {p}")
+        audio = fix_and_load_flac(p)
+    
+    if audio:
+        print("Файл успешно открыт:", audio.get('title'))
+    # else:
+    #     print("Ошибка: файл не удалось открыть даже после исправления.")
+
     if player:
         player.stop()
         player.set_mrl(path)
@@ -379,7 +435,19 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
         current_id = start_id
         for obj in files_to_add:
             try:
-                audio = mutagen.File(obj)
+                try:
+                    audio = mutagen.File(obj)
+                    if audio is None:
+                        raise FLACNoHeaderError("Файл не распознан")
+                except (FLACNoHeaderError, Exception):
+                    print(f"Попытка исправления файла: {obj}")
+                    audio = fix_and_load_flac(obj)
+                
+                if audio:
+                    print("Файл успешно открыт:", audio.get('title'))
+                # else:
+                #     print("Ошибка: файл не удалось открыть даже после исправления.")
+
                 tags = utils.get_audio_tags(audio, obj.stem)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
@@ -468,7 +536,20 @@ def add_favorite(p, insert_at=None):
 
         for obj in files_to_add:
             try:
-                audio = mutagen.File(obj)
+                
+                try:
+                    audio = mutagen.File(obj)
+                    if audio is None:
+                        raise FLACNoHeaderError("Файл не распознан")
+                except (FLACNoHeaderError, Exception):
+                    print(f"Попытка исправления файла: {obj}")
+                    audio = fix_and_load_flac(obj)
+                
+                if audio:
+                    print("Файл успешно открыт:", audio.get('title'))
+                # else:
+                #     print("Ошибка: файл не удалось открыть даже после исправления.")
+
                 tags = utils.get_audio_tags(audio, obj.stem)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
