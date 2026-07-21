@@ -39,6 +39,7 @@ idxDirrs = config.getboolean('Main Settings', 'idxDirrs') # если True чит
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
 start_vol_val = config.getint('Main Settings', 'start_vol_val')
 
+possible_covers = ["cover.jpg", "Cover.jpg", "cover.png", "folder.jpg"]
 
 #Системные функции ----
 
@@ -71,16 +72,28 @@ def extract_cover(audio, tec_audio_info_num, path):
         elif tec_audio_info_num == 2: #flac, wav
             if hasattr(audio, 'pictures') and audio.pictures:
                 raw_data = audio.pictures[0].data
+        if not raw_data:
+            folder_path = os.path.dirname(path)
+            for cover_name in possible_covers:
+                cover_path = os.path.join(folder_path, cover_name)
+
+                if os.path.exists(cover_path):
+                    image = Image.open(cover_path)
+                    if image.mode in ("RGBA", "P"):
+                        image = image.convert("RGB")  
+                    output_buffer = io.BytesIO()
+                    image.save(output_buffer, format="JPEG", quality=90) #q=90-95
+                    full_cover_bytes = output_buffer.getvalue()
+                    return full_cover_bytes
         return raw_data
 
 def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
+    global possible_covers
     # if not os.path.exists(path):
     #     return None
     raw_data = None
     # === ШАГ 1: Извлечение оригинальных байтов ===
     try:
-        # mutagen.File автоматически определяет формат аудиофайла
-
         try:
             audio = mutagen.File(path)
             if audio is None:
@@ -89,28 +102,20 @@ def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
             print(f"Попытка исправления файла: {path}")
             audio = fix_and_load_flac(path)
         
-        if audio:
-            print("Файл успешно открыт:", audio.get('title'))
-        # else:
-        #     print("Ошибка: файл не удалось открыть даже после исправления.")
-
-        if audio is None:
-            return None
-
         # (ID3)
-        if hasattr(audio, 'tags') and audio.tags:
-            for tag in audio.tags.values():
-                if isinstance(tag, APIC) or (hasattr(tag, 'type') and 'pic' in str(tag).lower()): # type: ignore
-                    raw_data = tag.data
-                    break
-        
-        # (FLAC, OGG, некоторые MP4)
-        if not raw_data and hasattr(audio, 'pictures') and audio.pictures:
-            raw_data = audio.pictures[0].data
+        if audio:
+            if hasattr(audio, 'tags') and audio.tags:
+                for tag in audio.tags.values():
+                    if isinstance(tag, APIC) or (hasattr(tag, 'type') and 'pic' in str(tag).lower()): # type: ignore
+                        raw_data = tag.data
+                        break
+            
+            # (FLAC, OGG, некоторые MP4)
+            if not raw_data and hasattr(audio, 'pictures') and audio.pictures:
+                raw_data = audio.pictures[0].data
 
     except Exception as e:
-        print(f"Ошибка при чтении тегов из {path}: {e}")
-        return None
+        print(f"Ошибка при чтении тегов из {path}: {e}. Идет поиск обложки в папке")
 
     # === ШАГ 2: Сжатие для базы данных ===
     if raw_data:
@@ -133,6 +138,26 @@ def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
             # Если Pillow не смог прочитать байты (битая картинка), 
             # возвращаем оригинальные байты как страховку
             return raw_data
+    else:
+        folder_path = os.path.dirname(path) 
+        for cover_name in possible_covers:
+            cover_path = os.path.join(folder_path, cover_name)
+
+            if os.path.exists(cover_path):
+                print(f"Найдена локальная обложка: {cover_path}")
+                try:
+                    image = Image.open(cover_path)
+                    
+                    if image.mode in ("RGBA", "P"):
+                        image = image.convert("RGB")    
+                    image.thumbnail((50,50), Image.Resampling.LANCZOS)
+                    output_buffer = io.BytesIO()
+                    image.save(output_buffer, format="JPEG", quality=85)
+                    return output_buffer.getvalue()
+                
+                except Exception as e:
+                    print(f"Ошибка при обработке локального cover.jpg в папке {folder_path}: {e}")
+    print(f"Обложка для {path} не найдена ни в тегах, ни в папке.")
     return None
 
 #Функции проводника ----
@@ -536,7 +561,6 @@ def add_favorite(p, insert_at=None):
 
         for obj in files_to_add:
             try:
-                
                 try:
                     audio = mutagen.File(obj)
                     if audio is None:
