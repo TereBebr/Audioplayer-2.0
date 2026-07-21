@@ -3,6 +3,8 @@ import sys
 import mutagen
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
+from pathlib import Path
+import pathlib
 
 #ИМПОРТ И ПРОВЕРКА VLC СРАЗУ ПОСЛЕ ЗАГРУЗКИ ФАЙЛА ---
 
@@ -74,17 +76,17 @@ def get_audio_info(audio, tec_audio_info_num):
             }  
     return details
     
-def get_audio_tags(audio, file_name):
+def get_audio_tags(audio, path):
     if audio is None or audio.tags is None:
-        return {"Название": file_name, "Автор": "Неизвестный исполнитель", "Альбом": "Неизвестный альбом", "Год": "", "Жанр": "",}
+        return {"Название": path.stem, "Автор": (path.parent.parent).stem, "Альбом": (path.parent).stem, "Год": "", "Жанр": "",}
     tags = {}
     
     # 1. Если MP3 (ID3)
     if isinstance(audio, MP3):
         tags = {
-            "Название": str(audio.get('TIT2', file_name)),
-            "Автор": str(audio.get('TPE1', "Неизвестный исполнитель")),
-            "Альбом": str(audio.get('TALB', '-')),
+            "Название": str(audio.get('TIT2', path.stem)),
+            "Автор": str(audio.get('TPE1', (path.parent.parent).stem)),
+            "Альбом": str(audio.get('TALB', (path.parent).stem)),
             "Год": str(audio.get('TDRC', audio.get('TYER', '-'))),
             "Жанр": str(audio.get('TCON', '-'))
         }
@@ -96,9 +98,9 @@ def get_audio_tags(audio, file_name):
             return val[0] if val else default
 
         tags = {
-            "Название": get_vorbis('title', file_name),
-            "Автор": get_vorbis('artist', "Неизвестный исполнитель"),
-            "Альбом": get_vorbis('album', '-'),
+            "Название": get_vorbis('title', path.stem),
+            "Автор": get_vorbis('artist', (path.parent.parent).stem),
+            "Альбом": get_vorbis('album', (path.parent).stem),
             "Год": get_vorbis('date', '-'),
             "Жанр": get_vorbis('genre', '-')
         }

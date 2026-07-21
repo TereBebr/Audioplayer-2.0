@@ -202,7 +202,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             # else:
             #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
-            tags = utils.get_audio_tags(audio, p.stem)
+            tags = utils.get_audio_tags(audio, p)
             miniature = extract_cover_bytes(p)
 
             con_queue = sqlite3.connect('queue.db')
@@ -357,7 +357,7 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
         is_paused = False
         play_btn_obj.src = "assets/icons/pause_ico_inac.png"
         play_btn_obj.update()
-    tags = utils.get_audio_tags(audio, p.stem)
+    tags = utils.get_audio_tags(audio, p)
     tec_audio_info_num = utils.tec_info(str(p), audio)
     details = utils.get_audio_info(audio, tec_audio_info_num)
     #cover = extract_cover(audio, tec_audio_info_num, p)
@@ -448,7 +448,7 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
                 # else:
                 #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
-                tags = utils.get_audio_tags(audio, obj.stem)
+                tags = utils.get_audio_tags(audio, obj)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
                 miniature = extract_cover_bytes(obj)
@@ -550,7 +550,7 @@ def add_favorite(p, insert_at=None):
                 # else:
                 #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
-                tags = utils.get_audio_tags(audio, obj.stem)
+                tags = utils.get_audio_tags(audio, obj)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
                 miniature = extract_cover_bytes(obj) # Рекомендую в будущем перевести на файловую систему
