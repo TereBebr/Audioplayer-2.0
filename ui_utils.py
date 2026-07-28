@@ -357,8 +357,8 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
         print(f"Попытка исправления файла: {p}")
         audio = fix_and_load_flac(p)
     
-    if audio:
-        print("Файл успешно открыт:", audio.get('title'))
+    # if audio:
+    #     print("Файл успешно открыт:", audio.get('title'))
     # else:
     #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
@@ -551,7 +551,7 @@ def add_favorite(p, insert_at=None):
         return
 
     # ID плейлиста "Избранное". Убедитесь, что плейлист с ID=0 существует в таблице playlists!
-    FAVORITE_PLAYLIST_ID = 0 
+    FAVORITE_PLAYLIST_ID = 1 
     
     con_queue = sqlite3.connect('app.db')
     cursor = con_queue.cursor()
@@ -568,9 +568,6 @@ def add_favorite(p, insert_at=None):
                 except (FLACNoHeaderError, Exception):
                     print(f"Попытка исправления файла: {obj}")
                     audio = fix_and_load_flac(obj)
-                
-                if audio:
-                    print("Файл успешно открыт:", audio.get('title'))
                 # else:
                 #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
@@ -626,10 +623,13 @@ def bg_ui_process(page: ft.Page, play_btn):
                     total_sec = total_length // 1000 if total_length > 0 else 0
                     
                     # Отправляем словарь с данными в UI-файл в топик "playback_update"
-                    page.pubsub.send_all_on_topic("playback_update", {
-                        "curr_sec": curr_sec,
-                        "total_sec": total_sec
-                    })
+                    try:
+                        page.pubsub.send_all_on_topic("playback_update", {
+                            "curr_sec": curr_sec,
+                            "total_sec": total_sec
+                        })
+                    except RuntimeError:
+                        break #Сессия закрыта
                 
                 # Если трек закончился
                 elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
