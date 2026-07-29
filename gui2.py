@@ -135,10 +135,10 @@ def App(page: ft.Page):
                                     rebuild_queue_ui()
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
-                                    ui_utils.add_favorite(p), 
-                                    # rebuild_favorite_ui()
+                                    ui_utils.add_favorite(p),
+                                    playlist_ui(page, playlist_list, play_btn, 1)
                                 )),
-                                ft.PopupMenuItem(content=ft.Text("Добавить в альбрм"), on_click=lambda e, p=full_item_path: (
+                                ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: (
                                     # ui_utils.add_playlist(p), 
                                     # rebuild_playlist_ui()
                                 )),
@@ -287,15 +287,16 @@ def App(page: ft.Page):
                 src_control = page.get_control(e.src_id) # Элемент, который тащим
                 if src_control is None:
                     return
-                src_data = src_control.data      # Это либо ID трека (int), либо путь (str)
-                target_id = e.control.data # Если бросили сами на себя — ничего не делаем
                 
+                src_data = src_control.data      # Это ID (int), путь (str) или словарь (dict)
+                target_id = e.control.data       # Место, куда бросили
+                
+                # ==========================================
+                # ВЕТКА 1: Бросили файл/папку (СТРОКА)
+                # ==========================================
                 if isinstance(src_data, str):
-                    # Вызываем обновленную функцию добавления, указывая куда вставить
                     ui_utils.add_queue(src_data, insert_at=target_id)
                     
-                    # Если папку/файл бросили прямо на место играющего трека (id 0),
-                    # имеет смысл сразу запустить первый трек из этой папки
                     if target_id == 0:
                         con_q = sqlite3.connect('queue.db')
                         cur = con_q.cursor()
@@ -305,56 +306,15 @@ def App(page: ft.Page):
                         if new_track:
                             ui_utils.load_track(page, new_track[0], play_btn, 0)
                             
-                    # Полностью перерисовываем очередь (БД уже обновилась)
                     rebuild_queue_ui()
-                    return # Прерываем функцию, чтобы не сработала логика ниже
+                    return # Прерываем функцию, дальше не идем
 
-                src_id = src_control.data
-                if src_id == target_id:
-                    return
-
-                # --- 2. ОБНОВЛЕНИЕ БАЗЫ ДАННЫХ (ГИБРИДНАЯ ЛОГИКА) ---
-                con_queue = sqlite3.connect('queue.db')
-                cursor = con_queue.cursor()
-                try:
-                    if target_id == 0:
-                        # ВЕТКА А: Бросили на 0 место (Вставка со сдвигом вниз)
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
-                        # Сдвигаем все треки от 0 до бывшего места перетаскиваемого трека на +1
-                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_id,))
-                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
-                        con_queue.commit()
-
-                        # Запускаем трек, так как он стал нулевым
-                        cursor.execute("SELECT path FROM queue WHERE id = 0")
-                        path_row = cursor.fetchone()
-                        if path_row:
-                            ui_utils.load_track(page, path_row[0], play_btn, 0)
-
-                    else:
-                        # ВЕТКА Б: Бросили на любое другое место (Обычный Swap)
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_id, target_id))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_id,))
-                        con_queue.commit()
-
-                        # Если мы утащили сам нулевой трек вниз, на его место (0) встал другой трек
-                        # Его тоже нужно включить
-                        if src_id == 0:
-                            cursor.execute("SELECT path FROM queue WHERE id = 0")
-                            path_row = cursor.fetchone()
-                            if path_row:
-                                ui_utils.load_track(page, path_row[0], play_btn, 0)
-
-                except Exception as ex:
-                    print(f"Ошибка БД при перетаскивании: {ex}")
-                    con_queue.rollback()
-                    return # Прерываем UI-обновление при ошибке
-                finally:
-                    con_queue.close()
-
+                # ==========================================
+                # ВЕТКА 2: Бросили трек ИЗ ПЛЕЙЛИСТА (СЛОВАРЬ)
+                # ==========================================
                 if isinstance(src_data, dict) and src_data.get("source") == "playlist":
-                    _, name, author, path, cov_bytes = src_data["track_data"]
+                    # ВАЖНО: Распаковываем 4 элемента, так как в drag_payload мы передавали 4!
+                    name, author, path, cov_bytes = src_data["track_data"]
 
                     con_q = sqlite3.connect('queue.db')
                     cur = con_q.cursor()
@@ -380,10 +340,53 @@ def App(page: ft.Page):
                     finally:
                         con_q.close()
 
-                    # При добавлении извне количество элементов меняется, поэтому нужен полный ребилд
                     rebuild_queue_ui()
-                    return # Прерываем функцию
-                # --- 3. ОБНОВЛЕНИЕ ИНТЕРФЕЙСА ---
+                    return # Прерываем функцию, дальше не идем
+
+                # ==========================================
+                # ВЕТКА 3: Перетаскивание ВНУТРИ ОЧЕРЕДИ (ЧИСЛО)
+                # ==========================================
+                src_id = src_data
+                if src_id == target_id:
+                    return
+
+                # --- ОБНОВЛЕНИЕ БАЗЫ ДАННЫХ (ГИБРИДНАЯ ЛОГИКА) ---
+                con_queue = sqlite3.connect('queue.db')
+                cursor = con_queue.cursor()
+                try:
+                    if target_id == 0:
+                        # ВЕТКА А: Бросили на 0 место (Вставка со сдвигом вниз)
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
+                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_id,))
+                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
+                        con_queue.commit()
+
+                        cursor.execute("SELECT path FROM queue WHERE id = 0")
+                        path_row = cursor.fetchone()
+                        if path_row:
+                            ui_utils.load_track(page, path_row[0], play_btn, 0)
+
+                    else:
+                        # ВЕТКА Б: Бросили на любое другое место (Обычный Swap)
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_id, target_id))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_id,))
+                        con_queue.commit()
+
+                        if src_id == 0:
+                            cursor.execute("SELECT path FROM queue WHERE id = 0")
+                            path_row = cursor.fetchone()
+                            if path_row:
+                                ui_utils.load_track(page, path_row[0], play_btn, 0)
+
+                except Exception as ex:
+                    print(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
+                    con_queue.rollback()
+                    return 
+                finally:
+                    con_queue.close()
+
+                # --- ОБНОВЛЕНИЕ ИНТЕРФЕЙСА (анимация и смена мест) ---
                 src_index = None
                 target_index = None
 
@@ -394,23 +397,18 @@ def App(page: ft.Page):
                         target_index = i
 
                 if src_index is not None and target_index is not None:
-                    
                     if target_id == 0:
-                        # ВЕТКА А (UI): Вырезаем элемент и вставляем в начало списка
                         moved_control = queue_list.controls.pop(src_index)
                         queue_list.controls.insert(0, moved_control)
                     else:
-                        # ВЕТКА Б (UI): Меняем элементы местами 1 к 1
                         queue_list.controls[src_index], queue_list.controls[target_index] = \
                             queue_list.controls[target_index], queue_list.controls[src_index]
 
-                    # --- 4. ОБНОВЛЕНИЕ СКРЫТЫХ ID И ВИЗУАЛА ---
                     for i, ctrl in enumerate(queue_list.controls):
-                        ctrl.data = i                  # Обновляем ID для DragTarget
-                        ctrl.content.data = i          # Обновляем ID для вложенного Draggable
-                        ctrl.content.content.data = i  # Обновляем ID для клика
+                        ctrl.data = i                  
+                        ctrl.content.data = i          
+                        ctrl.content.content.data = i  
 
-                        # Применяем зеленое выделение только к нулевому треку
                         is_playing = (i == 0)
                         border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
                         bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
@@ -612,38 +610,34 @@ def App(page: ft.Page):
     )
 
     def shift_playlist_track_db(playlist_id, old_pos, new_pos):
-        """Сдвигает позиции треков в плейлисте при перетаскивании"""
+        """Меняет местами два трека в плейлисте (Swap)"""
+        if old_pos == new_pos:
+            return # Если бросили на то же самое место, ничего не делаем
+
         con = sqlite3.connect('app.db')
         cursor = con.cursor()
         try:
-            # Убираем перетаскиваемый трек во "временную" зону (-1), чтобы не мешал сдвигу
+            # Шаг 1: Убираем перетаскиваемый трек во "временную" зону (-30)
             cursor.execute("""
-                UPDATE playlist_tracks SET position = -1 
+                UPDATE playlist_tracks SET position = -30 
                 WHERE playlist_id = ? AND position = ?
             """, (playlist_id, old_pos))
 
-            if old_pos < new_pos:
-                # Сдвигаем треки ВВЕРХ
-                cursor.execute("""
-                    UPDATE playlist_tracks SET position = position - 1
-                    WHERE playlist_id = ? AND position > ? AND position <= ?
-                """, (playlist_id, old_pos, new_pos))
-            else:
-                # Сдвигаем треки ВНИЗ
-                cursor.execute("""
-                    UPDATE playlist_tracks SET position = position + 1
-                    WHERE playlist_id = ? AND position >= ? AND position < ?
-                """, (playlist_id, new_pos, old_pos))
-
-            # Ставим трек на новую целевую позицию
+            # Шаг 2: Ставим трек, на который бросили, на старую позицию
             cursor.execute("""
                 UPDATE playlist_tracks SET position = ? 
-                WHERE playlist_id = ? AND position = -1
+                WHERE playlist_id = ? AND position = ?
+            """, (old_pos, playlist_id, new_pos))
+
+            # Шаг 3: Ставим перетаскиваемый трек из временной зоны на новую позицию
+            cursor.execute("""
+                UPDATE playlist_tracks SET position = ? 
+                WHERE playlist_id = ? AND position = -30
             """, (new_pos, playlist_id))
 
             con.commit()
         except Exception as e:
-            print(f"Ошибка при изменении порядка в плейлисте: {e}")
+            print(f"Ошибка при обмене позиций в плейлисте: {e}")
             con.rollback()
         finally:
             con.close()
@@ -749,13 +743,13 @@ def App(page: ft.Page):
             }
 
             drag_item = ft.DragTarget(
-                group="tracks_group", # ОБЩАЯ ГРУППА для плейлиста и очереди
+                group="queue_drag", # ОБЩАЯ ГРУППА для плейлиста и очереди
                 data=position,        # Таргет знает свою позицию
                 on_accept=on_accept,
                 on_will_accept=on_will_accept,
                 on_leave=on_leave,
                 content=ft.Draggable(
-                    group="tracks_group",
+                    group="queue_drag",
                     data=drag_payload, # Передаем полный словарь, чтобы очередь поняла, что ей прилетело
                     content=item_wrapper,
                     content_when_dragging=ft.Container(
