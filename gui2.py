@@ -57,18 +57,15 @@ search_barBorderCol = config.get('UI search_bar','search_barBorderCol') # Цве
 search_barBorderOp = config.getfloat('UI search_bar','search_barBorderOp') # Прозрачность рамки строки поиска
 search_bar_radius = config.getint('UI search_bar','search_bar_radius') # Сила скругления углов строки поиска
 # ==== queue_cell presets: ===
-queue_border_radius = 8
-#queue_cell = (45, 15, 12, 2, 8, 60) #настройки для ячейки очереди (размер обложки, размер названия, размер автора, расстояние между ними, отступы внутри ячейки, высота ячейки)
-#queue_cell = (35, 13, 10, 2, 3, 48)
-#queue_cell = (28, 11, 8, 0, 1, 33)
-#queue_cell = (22, 9, 6, 0, 0.5, 27)
+# (размер обложки, размер названия, размер автора, расстояние между ними, отступы внутри ячейки, высота ячейки)
+queue_border_radius = config.getint('UI queue_bar','queue_border_radius')
 method_queue_settings = config.getint('UI queue_bar','method_queue_settings')
 match method_queue_settings:
     case 0: 
         k_queue = config.getfloat('UI queue_bar','k_queue')
         queue_cell = ((46 * k_queue + 8.2), (12 * k_queue + 5.4), (12 * k_queue + 2.4), (4 * k_queue - 1.2), (15 * k_queue - 4), (76 * k_queue + 4.2))
     case 1:
-        queue_cell_preset = config.getint('UI search_bar','queue_cell_preset')
+        queue_cell_preset = config.getint('UI queue_bar','queue_cell_preset')
         match queue_cell_preset:
             case 0:
                 queue_cell = (22, 9, 6, 0, 0.5, 27)
@@ -79,18 +76,56 @@ match method_queue_settings:
             case 3:
                 queue_cell = (45, 15, 12, 2, 8, 60)
     case 2:
-        queue_cell1 = config.getint
-        queue_cell2 = config.getint
-        queue_cell3 = config.getint
-        queue_cell4 = config.getint
-        queue_cell5 = config.getint
-        queue_cell6 = config.getint
-        queue_cell = queue_cell1 + queue_cell2  
-    
+        queue_cell1 = config.getfloat('UI queue_bar','queue_cell1')
+        queue_cell2 = config.getfloat('UI queue_bar','queue_cell2')
+        queue_cell3 = config.getfloat('UI queue_bar','queue_cell3')
+        queue_cell4 = config.getfloat('UI queue_bar','queue_cell4')
+        queue_cell5 = config.getfloat('UI queue_bar','queue_cell5')
+        queue_cell6 = config.getfloat('UI queue_bar','queue_cell6')
+        queue_cell = []
+        queue_cell.append(queue_cell1)
+        queue_cell.append(queue_cell2)
+        queue_cell.append(queue_cell3)
+        queue_cell.append(queue_cell4)
+        queue_cell.append(queue_cell5)
+        queue_cell.append(queue_cell6)
+
+track_border_radius = config.getint('UI track_bar','track_border_radius')
+method_tracks_settings = config.getint('UI track_bar','method_tracks_settings')
+match method_tracks_settings:
+    case 0: 
+        k_track = config.getfloat('UI track_bar','k_track')
+        track_cell = ((46 * k_track + 8.2), (12 * k_track + 5.4), (12 * k_track + 2.4), (4 * k_track - 1.2), (15 * k_track - 4), (76 * k_track + 4.2))
+    case 1:
+        track_cell_preset = config.getint('UI track_bar','track_cell_preset')
+        match track_cell_preset:
+            case 0:
+                track_cell = (22, 9, 6, 0, 0.5, 27)
+            case 1:
+                track_cell = (28, 11, 8, 0, 1, 33)
+            case 2:
+                track_cell = (35, 13, 10, 2, 3, 48)
+            case 3:
+                track_cell = (45, 15, 12, 2, 8, 60)
+    case 2:
+        track_cell1 = config.getfloat('UI track_bar','track_cell1')
+        track_cell2 = config.getfloat('UI track_bar','track_cell2')
+        track_cell3 = config.getfloat('UI track_bar','track_cell3')
+        track_cell4 = config.getfloat('UI track_bar','track_cell4')
+        track_cell5 = config.getfloat('UI track_bar','track_cell5')
+        track_cell6 = config.getfloat('UI track_bar','track_cell6')
+        track_cell = []
+        track_cell.append(track_cell1)
+        track_cell.append(track_cell2)
+        track_cell.append(track_cell3)
+        track_cell.append(track_cell4)
+        track_cell.append(track_cell5)
+        track_cell.append(track_cell6)
+
 # k_queue = 0.7
 # queue_cell = ((46 * k_queue + 8.2), (12 * k_queue + 5.4), (12 * k_queue + 2.4), (4 * k_queue - 1.2), (15 * k_queue - 4), (76 * k_queue + 4.2))
-k_playlist_tracks = 0.6
-playlist_tracks_cell = ((46 * k_playlist_tracks + 8.2), (12 * k_playlist_tracks + 5.4), (12 * k_playlist_tracks + 2.4), (4 * k_playlist_tracks - 1.2), (15 * k_playlist_tracks - 4), (76 * k_playlist_tracks + 4.2))
+# k_tracks = 0.6
+# playlist_tracks_cell = ((46 * k_playlist_tracks + 8.2), (12 * k_playlist_tracks + 5.4), (12 * k_playlist_tracks + 2.4), (4 * k_playlist_tracks - 1.2), (15 * k_playlist_tracks - 4), (76 * k_playlist_tracks + 4.2))
 
 
 # ============================
@@ -738,21 +773,21 @@ def App(page: ft.Page):
         for row in rows:
             track_id, name, author, path, cov_bytes, position = row
 
-            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=track_cell[0])
             if cov_bytes is not None:
-                cover_img = ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+                cover_img = ft.Image(src=cov_bytes, width=track_cell[0], height=track_cell[0])
             
             # Сам контент трека. Здесь вешаем on_double_click
             item_content = ft.Container(
                 content=ft.Row([
                     cover_img,
                     ft.Column([
-                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD),
-                        ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
-                    ], spacing=queue_cell[3])
+                        ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD),
+                        ft.Text(author, size=track_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                    ], spacing=track_cell[3])
                 ]),
-                padding=queue_cell[4],
-                border_radius=queue_border_radius,
+                padding=track_cell[4],
+                border_radius=track_border_radius,
                 border=ft.Border.all(2, ft.Colors.TRANSPARENT) # Невидимая рамка для on_will_accept
             )
 
@@ -782,10 +817,10 @@ def App(page: ft.Page):
                     data=drag_payload, # Передаем полный словарь, чтобы очередь поняла, что ей прилетело
                     content=item_wrapper,
                     content_when_dragging=ft.Container(
-                        content=ft.Text(f"Перемещение: {name}", size=queue_cell[1]),
-                        padding=queue_cell[4],
+                        content=ft.Text(f"Перемещение: {name}", size=track_cell[1]),
+                        padding=track_cell[4],
                         bgcolor=ft.Colors.INVERSE_SURFACE,
-                        border_radius=queue_border_radius,
+                        border_radius=track_border_radius,
                         opacity=0.8
                     )
                 )
