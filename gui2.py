@@ -62,8 +62,37 @@ queue_border_radius = 8
 #queue_cell = (35, 13, 10, 2, 3, 48)
 #queue_cell = (28, 11, 8, 0, 1, 33)
 #queue_cell = (22, 9, 6, 0, 0.5, 27)
-k = 0.7
-queue_cell = ((46 * k + 8.2), (12 * k + 5.4), (12 * k + 2.4), (4 * k - 1.2), (15 * k - 4), (76 * k + 4.2))
+method_queue_settings = config.getint('UI queue_bar','method_queue_settings')
+match method_queue_settings:
+    case 0: 
+        k_queue = config.getfloat('UI queue_bar','k_queue')
+        queue_cell = ((46 * k_queue + 8.2), (12 * k_queue + 5.4), (12 * k_queue + 2.4), (4 * k_queue - 1.2), (15 * k_queue - 4), (76 * k_queue + 4.2))
+    case 1:
+        queue_cell_preset = config.getint('UI search_bar','queue_cell_preset')
+        match queue_cell_preset:
+            case 0:
+                queue_cell = (22, 9, 6, 0, 0.5, 27)
+            case 1:
+                queue_cell = (28, 11, 8, 0, 1, 33)
+            case 2:
+                queue_cell = (35, 13, 10, 2, 3, 48)
+            case 3:
+                queue_cell = (45, 15, 12, 2, 8, 60)
+    case 2:
+        queue_cell1 = config.getint
+        queue_cell2 = config.getint
+        queue_cell3 = config.getint
+        queue_cell4 = config.getint
+        queue_cell5 = config.getint
+        queue_cell6 = config.getint
+        queue_cell = queue_cell1 + queue_cell2  
+    
+# k_queue = 0.7
+# queue_cell = ((46 * k_queue + 8.2), (12 * k_queue + 5.4), (12 * k_queue + 2.4), (4 * k_queue - 1.2), (15 * k_queue - 4), (76 * k_queue + 4.2))
+k_playlist_tracks = 0.6
+playlist_tracks_cell = ((46 * k_playlist_tracks + 8.2), (12 * k_playlist_tracks + 5.4), (12 * k_playlist_tracks + 2.4), (4 * k_playlist_tracks - 1.2), (15 * k_playlist_tracks - 4), (76 * k_playlist_tracks + 4.2))
+
+
 # ============================
 
 playlist_id = -1
