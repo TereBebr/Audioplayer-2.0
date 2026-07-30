@@ -550,7 +550,7 @@ def add_favorite(p, insert_at=None):
     if not files_to_add:
         return
 
-    # ID плейлиста "Избранное". Убедитесь, что плейлист с ID=0 существует в таблице playlists!
+    # ID плейлиста "Избранное". Убедитесь, что плейлист с ID=1 существует в таблице playlists!
     FAVORITE_PLAYLIST_ID = 1 
     
     con_queue = sqlite3.connect('app.db')
@@ -607,6 +607,45 @@ def add_favorite(p, insert_at=None):
         con_queue.close()
 
 
+def delete_playlist_track(track_id: int, playlist_id: int):
+    con = sqlite3.connect('app.db')
+    cursor = con.cursor()
+    cursor.execute("PRAGMA foreign_keys = ON;")
+
+    try:
+        # 1. Узнаем позицию удаляемого трека
+        cursor.execute("""
+            SELECT position FROM playlist_tracks 
+            WHERE playlist_id = ? AND track_id = ?
+        """, (playlist_id, track_id))
+        
+        row = cursor.fetchone()
+        if not row:
+            return  # Трека и так нет в этом плейлисте
+
+        deleted_pos = row[0]
+
+        # 2. Удаляем связку
+        cursor.execute("""
+            DELETE FROM playlist_tracks 
+            WHERE playlist_id = ? AND track_id = ?
+        """, (playlist_id, track_id))
+
+        # 3. Сдвигаем позиции всех последующих треков
+        cursor.execute("""
+            UPDATE playlist_tracks 
+            SET position = position - 1 
+            WHERE playlist_id = ? AND position > ?
+        """, (playlist_id, deleted_pos))
+
+        con.commit()
+    except Exception as e:
+        con.rollback()
+        print(f"Ошибка при удалении трека из плейлиста: {e}")
+    finally:
+        con.close()
+
+
 #----
 
 def bg_ui_process(page: ft.Page, play_btn):
@@ -646,6 +685,11 @@ def bg_ui_process(page: ft.Page, play_btn):
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
                     else: #все кончилось включая очередь
+                        # проверка последний ли это был трек
+                        cursor.execute("SELECT * FROM queue WHERE id = (SELECT MAX(id) FROM queue)")
+                        l = cursor.fetchone()
+                        if l[0] > 0: # треки еще есть
+                             cursor.execute("UPDATE queue SET id = id -1 WHERE id > 1")
                         con_queue.commit()
                         con_queue.close()
                         pass

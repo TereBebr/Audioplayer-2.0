@@ -815,7 +815,34 @@ def App(page: ft.Page):
                 content=ft.Draggable(
                     group="queue_drag",
                     data=drag_payload, # Передаем полный словарь, чтобы очередь поняла, что ей прилетело
-                    content=item_wrapper,
+                    content=ft.ContextMenu(
+                        content=item_wrapper,
+                        secondary_items=[
+                            ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=path: (
+                                    ui_utils.add_queue(p),
+                                    rebuild_queue_ui(),
+                                ),
+                            ),
+                            *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
+                                ui_utils.add_favorite(p),
+                                playlist_ui(page, playlist_list, play_btn, 1),)),]
+                                if playlist_id != 1
+                                else []
+                            ),
+                            ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, id=track_id: (
+                                    # выпадающее меню с выбором альбомов
+                                ),
+                            ),
+                            *([ft.PopupMenuItem(content=ft.Text("Удалить из избранного"), on_click=lambda e, id=track_id:(
+                                ui_utils.delete_playlist_track(id, 1),
+                                playlist_ui(page, playlist_list, play_btn, 1),)),]
+                                if playlist_id == 1
+                                else [
+                                    ft.PopupMenuItem(content=ft.Text("Удалить из альбома")),
+                                ]
+                            ),
+                        ]
+                    ),
                     content_when_dragging=ft.Container(
                         content=ft.Text(f"Перемещение: {name}", size=track_cell[1]),
                         padding=track_cell[4],
