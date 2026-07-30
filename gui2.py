@@ -323,13 +323,37 @@ def App(page: ft.Page):
                 pass
             
             item_content = ft.Container(
-                content=ft.Row([
-                    cover_img,
-                    ft.Column([
-                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
-                        ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
-                    ], spacing=queue_cell[3])
-                ]),
+                content=ft.ContextMenu(
+                    content=ft.Row([
+                        cover_img,
+                        ft.Column([
+                            ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
+                            ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                        ], spacing=queue_cell[3])
+                    ]),
+                    secondary_items=[
+                        ft.PopupMenuItem(content=ft.Text("Дублировать"), on_click=lambda e, id=track_id: (
+                                ui_utils.dublicate_queue_track(id),
+                                rebuild_queue_ui(),
+                            ),
+                        ),
+                        ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
+                                ui_utils.add_favorite(p),
+                                playlist_ui(page, playlist_list, play_btn, 1)
+                            ),
+                        ),
+                        ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: (
+                                # ui_utils.add_queue(p),
+                                # rebuild_queue_ui(),
+                            ),
+                        ),
+                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, p=path: (
+                                ui_utils.add_queue(p),
+                                rebuild_queue_ui(),
+                            ),
+                        ),
+                    ]
+                ),
                 padding=queue_cell[4],
                 border=ft.Border.all(2, border_color),
                 border_radius=queue_border_radius,

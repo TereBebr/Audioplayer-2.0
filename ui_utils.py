@@ -645,6 +645,24 @@ def delete_playlist_track(track_id: int, playlist_id: int):
     finally:
         con.close()
 
+def dublicate_queue_track(track_id: int):
+    con = sqlite3.connect("queue.db")
+    cursor = con.cursor()
+    try:
+        cursor.execute("SELECT * FROM queue WHERE id = ?", (track_id,))
+        r = cursor.fetchone()
+        if r:
+            cursor.execute("UPDATE queue SET id = id + 1 WHERE id > ?", (track_id,))
+            cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?,?,?,?,?)",(track_id + 1, r[1],r[2],r[3],r[4]))
+            con.commit()
+        else:
+            print(f"Трек с id={track_id} не найден в очереди.")
+    except Exception as e:
+        con.rollback()
+        print(f"Ошибка вызова операции: {e}")
+    finally:
+        con.close()
+
 
 #----
 
