@@ -576,12 +576,15 @@ def add_favorite(p, insert_at=None):
                 author = tags.get("Автор", "Неизвестно")
                 miniature = extract_cover_bytes(obj) # Рекомендую в будущем перевести на файловую систему
                 file_path_str = str(obj)
-                
+
+                cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))
+                test_id = cursor.fetchone()
+                if test_id is None: #багфикс
                 # 1. Добавляем трек в общую базу (если его там еще нет). Без передачи ID!
-                cursor.execute("""
-                    INSERT OR IGNORE INTO tracks (name, author, path, cov_bytes) 
-                    VALUES (?, ?, ?, ?)
-                """, (name, author, file_path_str, miniature))
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO tracks (name, author, path, cov_bytes) 
+                        VALUES (?, ?, ?, ?)
+                    """, (name, author, file_path_str, miniature))
                 
                 # 2. Получаем НАСТОЯЩИЙ ID этого трека из базы (неважно, новый он или уже был)
                 cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))
@@ -638,6 +641,12 @@ def delete_playlist_track(track_id: int, playlist_id: int):
             WHERE playlist_id = ? AND position > ?
         """, (playlist_id, deleted_pos))
 
+        # багфикс: если нет в альбомах удаляю из tracks
+        cursor.execute("SELECT position FROM playlist_tracks WHERE track_id = ?",(track_id,))
+        s = cursor.fetchone()
+        if s is None:
+            cursor.execute("DELETE FROM tracks WHERE id = ?",(track_id,))
+        
         con.commit()
     except Exception as e:
         con.rollback()
