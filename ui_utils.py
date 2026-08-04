@@ -17,6 +17,7 @@ import random
 from mutagen.flac import FLACNoHeaderError
 import subprocess
 
+
 player = None
 tags = None
 details = None
@@ -95,12 +96,10 @@ def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
     # === ШАГ 1: Извлечение оригинальных байтов ===
     try:
         try:
-            audio = mutagen.File(path)
-            if audio is None:
-                raise FLACNoHeaderError("Файл не распознан")
-        except (FLACNoHeaderError, Exception):
-            print(f"Попытка исправления файла: {path}")
-            audio = fix_and_load_flac(path)
+            audio = mutagen.File(obj)
+        except Exception as e:
+            audio = utils.detect_and_load_audio(obj)
+            print(e)
         
         # (ID3)
         if audio:
@@ -189,22 +188,6 @@ def get_folder_content(folder_path: str | Path):#анализ текущей п�
 
     return folders + tracks
 
-def fix_and_load_flac(path):
-    """Пытается исправить заголовок через ffmpeg и прочитать файл."""
-    str_path = str(path)
-    fixed_path = str_path.replace(".flac", "_fixed.flac")
-    
-    # ffmpeg копирует поток в новый контейнер, исправляя структуру заголовка
-    cmd = ['ffmpeg', '-y', '-i', str_path, '-c:a', 'copy', fixed_path]
-    
-    try:
-        subprocess.run(cmd, check=True, capture_output=True)
-        # После исправления пробуем прочитать уже новый файл
-        return mutagen.File(fixed_path, easy=True)
-    except Exception as e:
-        print(f"Не удалось исправить файл {path}: {e}")
-        return None
-
 def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на объект
         text = e.control.data
         p = Path(text).resolve()
@@ -216,11 +199,9 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             #в 0 эл. очереди
             try:
                 audio = mutagen.File(p)
-                if audio is None:
-                    raise FLACNoHeaderError("Файл не распознан")
-            except (FLACNoHeaderError, Exception):
-                print(f"Попытка исправления файла: {p}")
-                audio = fix_and_load_flac(p)
+            except Exception as e:
+                audio = utils.detect_and_load_audio(p)
+                print(e)
             
             if audio:
                 print("Файл успешно открыт:", audio.get('title'))
@@ -352,19 +333,13 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
     try:
         audio = mutagen.File(p)
         if audio is None:
-            raise FLACNoHeaderError("Файл не распознан")
-    except (FLACNoHeaderError, Exception):
-        print(f"Попытка исправления файла: {p}")
-        audio = fix_and_load_flac(p)
-    
-    # if audio:
-    #     print("Файл успешно открыт:", audio.get('title'))
-    # else:
-    #     print("Ошибка: файл не удалось открыть даже после исправления.")
+            raise ValueError("Файл не распознан")
+    except Exception:
+        audio = utils.detect_and_load_audio(p)
 
     if player:
         player.stop()
-        player.set_mrl(path)
+        player.set_mrl(p)
         if autoplayswitch == False:
             player.play()
             play_btn_obj.src = "assets/icons/pause_ico_inac.png"
@@ -383,7 +358,7 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
         play_btn_obj.src = "assets/icons/pause_ico_inac.png"
         play_btn_obj.update()
     tags = utils.get_audio_tags(audio, p)
-    tec_audio_info_num = utils.tec_info(str(p), audio)
+    tec_audio_info_num = utils.tec_info(audio)
     details = utils.get_audio_info(audio, tec_audio_info_num)
     #cover = extract_cover(audio, tec_audio_info_num, p)
     tags["cover"] = extract_cover(audio, tec_audio_info_num, p)
@@ -462,12 +437,9 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
             try:
                 try:
                     audio = mutagen.File(obj)
-                    if audio is None:
-                        raise FLACNoHeaderError("Файл не распознан")
-                except (FLACNoHeaderError, Exception):
-                    print(f"Попытка исправления файла: {obj}")
-                    audio = fix_and_load_flac(obj)
-                
+                except Exception as e:
+                    audio = utils.detect_and_load_audio(obj)
+                    print(e)
                 if audio:
                     print("Файл успешно открыт:", audio.get('title'))
                 # else:
@@ -563,11 +535,9 @@ def add_favorite(p, insert_at=None):
             try:
                 try:
                     audio = mutagen.File(obj)
-                    if audio is None:
-                        raise FLACNoHeaderError("Файл не распознан")
-                except (FLACNoHeaderError, Exception):
-                    print(f"Попытка исправления файла: {obj}")
-                    audio = fix_and_load_flac(obj)
+                except Exception as e:
+                    audio = utils.detect_and_load_audio(obj)
+                    print(e)
                 # else:
                 #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
@@ -675,13 +645,17 @@ def dublicate_queue_track(track_id: int):
 
 #----
 
+import vlc
 def bg_ui_process(page: ft.Page, play_btn):
     """Функция, которая будет крутиться в фоне и генерировать данные"""
     def run():
         global curr_sec, total_sec, is_paused
+        track_ended_handled = False
         while True:
             # Обязательно проверяем, создан ли плеер, чтобы поток не крашился при старте!
             if player:
+                state = player.get_state()
+                print(state)
                 # Если плеер играет и ползунок не перетаскивают
                 if player.is_playing() and not is_dragging:
                     curr_sec = player.get_time() // 1000
@@ -696,9 +670,12 @@ def bg_ui_process(page: ft.Page, play_btn):
                         })
                     except RuntimeError:
                         break #Сессия закрыта
+                    track_ended_handled = False
                 
                 # Если трек закончился
-                elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
+                # elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
+                elif state == vlc.State.Ended and not track_ended_handled:
+                    track_ended_handled = True
                     con_queue = sqlite3.connect('queue.db')
                     cursor = con_queue.cursor()
                     cursor.execute("SELECT path FROM queue WHERE id = 1")
@@ -711,6 +688,7 @@ def bg_ui_process(page: ft.Page, play_btn):
                         curr_sec = 0
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
+                        track_ended_handled = False
                     else: #все кончилось включая очередь
                         # проверка последний ли это был трек
                         cursor.execute("SELECT * FROM queue WHERE id = (SELECT MAX(id) FROM queue)")

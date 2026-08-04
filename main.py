@@ -61,7 +61,7 @@ if __name__ == "__main__":
     #total_sec = audio.info.length // 1000
     #if total_sec == 0: total_sec = 1
     
-    import ui_utils
+    # import ui_utils
     #ui_utils.init_data(player=None, tags=None, details=None, total_sec=0)
 
     from gui2 import App

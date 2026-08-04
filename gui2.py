@@ -271,11 +271,11 @@ def App(page: ft.Page):
         return spans
     path_text = ft.Text(spans=build_breadcrumbs(p), no_wrap=True)
 
-    queue_list = ft.Column(
+    queue_list = ft.ListView(
         spacing=8,
         scroll=ft.ScrollMode.AUTO, 
         expand=True,
-        alignment=ft.MainAxisAlignment.START
+        # alignment=ft.MainAxisAlignment.START
     )
     
     def rebuild_queue_ui():
