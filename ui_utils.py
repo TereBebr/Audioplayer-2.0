@@ -96,9 +96,9 @@ def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
     # === ШАГ 1: Извлечение оригинальных байтов ===
     try:
         try:
-            audio = mutagen.File(obj)
+            audio = mutagen.File(path)
         except Exception as e:
-            audio = utils.detect_and_load_audio(obj)
+            audio = utils.detect_and_load_audio(path)
             print(e)
         
         # (ID3)
@@ -655,7 +655,7 @@ def bg_ui_process(page: ft.Page, play_btn):
             # Обязательно проверяем, создан ли плеер, чтобы поток не крашился при старте!
             if player:
                 state = player.get_state()
-                print(state)
+                # print(state)
                 # Если плеер играет и ползунок не перетаскивают
                 if player.is_playing() and not is_dragging:
                     curr_sec = player.get_time() // 1000
