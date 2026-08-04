@@ -88,7 +88,7 @@ def extract_cover(audio, tec_audio_info_num, path):
                     return full_cover_bytes
         return raw_data
 
-def extract_cover_bytes(path): # Извлечение миниатюры 50x50p
+def extract_cover_miniature(path): # Извлечение миниатюры 50x50p
     global possible_covers
     # if not os.path.exists(path):
     #     return None
@@ -209,7 +209,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
             tags = utils.get_audio_tags(audio, p)
-            miniature = extract_cover_bytes(p)
+            miniature = extract_cover_miniature(p)
 
             con_queue = sqlite3.connect('queue.db')
             cursor = con_queue.cursor()
@@ -448,7 +448,7 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
                 tags = utils.get_audio_tags(audio, obj)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
-                miniature = extract_cover_bytes(obj)
+                miniature = extract_cover_miniature(obj)
 
                 cursor.execute(
                     "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
@@ -544,7 +544,7 @@ def add_favorite(p, insert_at=None):
                 tags = utils.get_audio_tags(audio, obj)
                 name = tags["Название"] if tags.get("Название") else obj.name
                 author = tags.get("Автор", "Неизвестно")
-                miniature = extract_cover_bytes(obj) # Рекомендую в будущем перевести на файловую систему
+                miniature = extract_cover_miniature(obj) # Рекомендую в будущем перевести на файловую систему
                 file_path_str = str(obj)
 
                 cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))

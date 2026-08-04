@@ -1,4 +1,6 @@
 import flet as ft
+import asyncio
+import functools
 import ui_utils
 from pathlib import Path
 from ui_utils import bg_ui_process
@@ -149,6 +151,14 @@ def App(page: ft.Page):
     fit="contain",
     )
 
+    async def on_files_dropped(path, insert):
+        # path = e.path
+        await asyncio.to_thread(ui_utils.add_queue, path, insert)
+        rebuild_queue_ui()
+
+    async def _on_add_to_queue_click(p, i, e=None):
+        await on_files_dropped(p, i)
+
     # Динамический проводник
     def rebuild_explorer(items, current_dir):
         explorer_tree.controls.clear()
@@ -194,10 +204,7 @@ def App(page: ft.Page):
                         data=item["path"], 
                         content=ft.ContextMenu(
                             secondary_items=[
-                                ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=full_item_path: (
-                                    ui_utils.add_queue(p), 
-                                    rebuild_queue_ui()
-                                )),
+                                ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, full_item_path, None),),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
                                     ui_utils.add_favorite(p),
                                     playlist_ui(page, playlist_list, play_btn, 1)
@@ -343,12 +350,12 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: (
-                                # ui_utils.add_queue(p),
+                                # on_files_dropped(p),
                                 # rebuild_queue_ui(),
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, p=path: (
-                                ui_utils.add_queue(p),
+                                # on_files_dropped(p),
                                 rebuild_queue_ui(),
                             ),
                         ),
@@ -383,7 +390,7 @@ def App(page: ft.Page):
                 # ВЕТКА 1: Бросили файл/папку (СТРОКА)
                 # ==========================================
                 if isinstance(src_data, str):
-                    ui_utils.add_queue(src_data, insert_at=target_id)
+                    on_files_dropped(src_data, insert_at=target_id)
                     
                     if target_id == 0:
                         con_q = sqlite3.connect('queue.db')
@@ -842,10 +849,7 @@ def App(page: ft.Page):
                     content=ft.ContextMenu(
                         content=item_wrapper,
                         secondary_items=[
-                            ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, p=path: (
-                                    ui_utils.add_queue(p),
-                                    rebuild_queue_ui(),
-                                ),
+                            ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
                             ),
                             *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
                                 ui_utils.add_favorite(p),
