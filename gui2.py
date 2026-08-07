@@ -155,9 +155,102 @@ def App(page: ft.Page):
         # path = e.path
         await asyncio.to_thread(ui_utils.add_queue, path, insert)
         rebuild_queue_ui()
-
     async def _on_add_to_queue_click(p, i, e=None):
         await on_files_dropped(p, i)
+
+    def show_albums_dialog(e, track_path):
+        selected_albums = set()
+        page = e.page
+
+        # Обработчик изменения чекбокса
+        def checkbox_changed(e, album_id):
+            if e.control.value:
+                selected_albums.add(album_id)
+            else:
+                selected_albums.discard(album_id)
+
+        def close_dialog(e):
+            dlg.open = False
+            page.update()
+
+        def save_selection(e):
+            for alb in selected_albums:
+                ui_utils.add_track_to_playlist(track_path, alb)
+            print(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
+            close_dialog(e)
+            playlist_ui(page, playlist_list, play_btn, 1)
+
+        def get_playlists(e):
+            con_app = sqlite3.connect('app.db')
+            cursor = con_app.cursor()
+            albums = []
+
+            try:
+                cursor.execute("SELECT id, name, cover_path FROM playlists")
+                results = cursor.fetchall()
+            
+                for playlist_id, name, cover_path in results:
+                    a = {"id": playlist_id, "name": name, "img": cover_path}
+                    albums.append(a)
+                    
+            except Exception as er:
+                print(f"Ошибка извлечения списка плейлистов {er}")
+                close_dialog(e)
+            finally:
+                con_app.close()
+
+            return albums
+
+        # Сборка
+        album_controls = []
+        albums = get_playlists(e)
+        for album in albums:
+            fallback_cover = ft.Container(
+                content=ft.Icon(ft.Icons.ALBUM, color=ft.Colors.WHITE, size=24),
+                width=40,
+                height=40,
+                bgcolor=ft.Colors.BLUE_GREY_700,
+                border_radius=5,
+            )
+            album_controls.append(
+                ft.Row(
+                    controls=[
+                        fallback_cover,
+                        ft.Text(album["name"], expand=True),
+                        ft.Checkbox(
+                            value=False, 
+                            on_change=lambda e, a_id=album["id"]: checkbox_changed(e, a_id)
+                        )
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                )
+            )
+
+        # Создаем диалог
+        dlg = ft.AlertDialog(
+            title=ft.Row([
+                ft.Icon(ft.Icons.LIBRARY_MUSIC),
+                ft.Text("Выберите альбомы")
+            ]),
+            content=ft.Container(
+                width=200,
+                height=250,
+                content=ft.Column(
+                    controls=album_controls,
+                    tight=True,
+                    scroll=ft.ScrollMode.AUTO,
+                )
+            ),
+            actions=[
+                ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
     # Динамический проводник
     def rebuild_explorer(items, current_dir):
@@ -209,10 +302,7 @@ def App(page: ft.Page):
                                     ui_utils.add_track_to_playlist(p, 1),
                                     playlist_ui(page, playlist_list, play_btn, 1)
                                 )),
-                                ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: (
-                                    # ui_utils.add_playlist(p), 
-                                    # rebuild_playlist_ui()
-                                )),
+                                ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: show_albums_dialog(e, p)),
                             ],
                         content=ft.GestureDetector(
                             data=item["path"],
@@ -349,11 +439,7 @@ def App(page: ft.Page):
                                 playlist_ui(page, playlist_list, play_btn, 1)
                             ),
                         ),
-                        ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: (
-                                # on_files_dropped(p),
-                                # rebuild_queue_ui(),
-                            ),
-                        ),
+                        ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                         ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, id=track_id: (
                                 ui_utils.delete_track_from_queue(e, id, play_btn),
                                 rebuild_queue_ui(),
@@ -677,12 +763,12 @@ def App(page: ft.Page):
         cursor = con_app.cursor()
 
         try:
-            cursor.execute("SELECT id, name, cover_path FROM playlists")        
+            cursor.execute("SELECT id, name, cover_path FROM playlists")
             results = cursor.fetchall()
         
             ids = []
             names = []
-            covers = []        
+            covers = []
             for row in results:
                 ids.append(row[0])
                 names.append(row[1])
@@ -857,10 +943,7 @@ def App(page: ft.Page):
                                 if playlist_id != 1
                                 else []
                             ),
-                            ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, id=track_id: (
-                                    # выпадающее меню с выбором альбомов
-                                ),
-                            ),
+                            ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                             *([ft.PopupMenuItem(content=ft.Text("Удалить из избранного"), on_click=lambda e, id=track_id:(
                                 ui_utils.delete_playlist_track(id, 1),
                                 playlist_ui(page, playlist_list, play_btn, 1),)),]

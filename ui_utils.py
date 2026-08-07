@@ -16,7 +16,9 @@ import sqlite3
 import random
 from mutagen.flac import FLACNoHeaderError
 import subprocess
+import logging
 
+logger = logging.getLogger(__name__)
 
 player = None
 tags = None
@@ -38,7 +40,7 @@ upd_time = config.getfloat('Main Settings', 'upd_time') # Время обнов�
 autoplayswitch = config.getboolean('Main Settings', 'autoplayswitch') # Автопауза при смене трека
 idxDirrs = config.getboolean('Main Settings', 'idxDirrs') # если True читает все подпапки во время добавления в очередь папки, если False, только то что внутри папки
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
-start_vol_val = config.getint('Main Settings', 'start_vol_val')
+start_vol_val = config.getint('Main Settings', 'start_vol_val') # Начальное значение звука
 
 possible_covers = ["cover.jpg", "Cover.jpg", "cover.png", "folder.jpg"]
 
@@ -483,30 +485,7 @@ def mix_queue(rebuild_queue):
 #----
 # Плейлисты ----
 
-def add_track_to_playlist(cursor, playlist_id, track_id, insert_at=None):
-    if insert_at is None:
-        # Добавляем в конец плейлиста
-        cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
-        last_pos = cursor.fetchone()[0] or 0
-        new_position = last_pos + 1
-    else:
-        # Вставка по индексу: сдвигаем ПОЗИЦИИ (position) в плейлисте, а не ID треков!
-        cursor.execute("""
-            UPDATE playlist_tracks 
-            SET position = position + 1 
-            WHERE playlist_id = ? AND position >= ?
-        """, (playlist_id, insert_at))
-        new_position = insert_at
-
-    # Добавляем трек в плейлист. 
-    # Используем IGNORE, чтобы не добавить один и тот же трек в Избранное дважды
-    cursor.execute("""
-        INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
-        VALUES (?, ?, ?)
-    """, (playlist_id, track_id, new_position))
-
-
-def add_track_to_playlist(p, album_idx, insert_at=None):
+def add_track_to_playlist(p, playlist_id, insert_at=None):
     path = Path(p)
     files_to_add = []
 
@@ -521,54 +500,73 @@ def add_track_to_playlist(p, album_idx, insert_at=None):
     if not files_to_add:
         return
     
-    con_queue = sqlite3.connect('app.db')
-    cursor = con_queue.cursor()
-    
-    try:
-        current_insert_pos = insert_at
-        for obj in files_to_add:
+    tracks_data = []
+    for obj in files_to_add:
+        try:
             try:
-                try:
-                    audio = mutagen.File(obj)
-                except Exception as e:
-                    audio = utils.detect_and_load_audio(obj)
-                    print(e)
+                audio = mutagen.File(obj)
+            except Exception as e:
+                audio = utils.detect_and_load_audio(obj)
+                logger.debug(f"Mutagen не справился с {obj.name}, fallback: {e}")
+            tags = utils.get_audio_tags(audio, obj)
+            name = tags["Название"] if tags.get("Название") else obj.name
+            author = tags.get("Автор", "Неизвестно")
+            miniature = extract_cover_miniature(obj) #TODO: перевести на файловую систему
 
-                tags = utils.get_audio_tags(audio, obj)
-                name = tags["Название"] if tags.get("Название") else obj.name
-                author = tags.get("Автор", "Неизвестно")
-                miniature = extract_cover_miniature(obj) # Рекомендую в будущем перевести на файловую систему
-                file_path_str = str(obj)
+            tracks_data.append({
+                "path": str(obj),
+                "name": name,
+                "author": author,
+                "cov_bytes": miniature
+            })
+        except Exception as e:
+            logger.error(f"Ошибка чтения файла {obj}: {e}")
+    if not tracks_data:
+        return
+    
+    with sqlite3.connect('app.db') as con_queue:
+        cursor = con_queue.cursor()
+        try:
+            # Если вставка по индексу, сдвигаем остаток
+            if insert_at is not None:
+                cursor.execute("""UPDATE playlist_tracks SET position = position + ? WHERE playlist_id = ? AND position >= ? """, 
+                               (len(tracks_data), playlist_id, insert_at))
+                current_position = insert_at
+            else:
+                cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+                current_position = (cursor.fetchone()[0] or 0) + 1
 
-                cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))
+            # Запись треков
+            for track in tracks_data:
+
+                # холостой обход
+                cursor.execute("SELECT id FROM tracks WHERE path = ?", (track["path"],))
                 test_id = cursor.fetchone()
-                if test_id is None: #багфикс
-                # 1. Добавляем трек в общую базу (если его там еще нет). Без передачи ID!
+                if test_id is None:
+                    # Добавляем в общую таблицу
                     cursor.execute("""
                         INSERT OR IGNORE INTO tracks (name, author, path, cov_bytes) 
                         VALUES (?, ?, ?, ?)
-                    """, (name, author, file_path_str, miniature))
+                    """, (track["name"], track["author"], track["path"], track["cov_bytes"]))
                 
-                # 2. Получаем НАСТОЯЩИЙ ID этого трека из базы (неважно, новый он или уже был)
-                cursor.execute("SELECT id FROM tracks WHERE path = ?", (file_path_str,))
+                # Получаем ID
+                cursor.execute("SELECT id FROM tracks WHERE path = ?", (track["path"],))
                 track_id = cursor.fetchone()[0]
+
+                # Добавляем в плейлист
+                cursor.execute("""
+                    INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+                    VALUES (?, ?, ?)
+                """, (playlist_id, track_id, current_position))
                 
-                # 3. Привязываем трек к плейлисту "Избранное"
-                add_track_to_playlist(cursor, album_idx, track_id, current_insert_pos)
-                
-                # Если вставляем по индексу, каждый следующий файл встает за предыдущим
-                if current_insert_pos is not None:
-                    current_insert_pos += 1
-                    
-            except Exception as e:
-                print(f"Ошибка чтения файла {obj}: {e}")
-        con_queue.commit()
-        print(f"Добавлено {len(files_to_add)} файлов в Избранное.")
-    except Exception as e:
-        print(f"Ошибка БД при добавлении в Избранное: {e}")
-        con_queue.rollback()
-    finally:
-        con_queue.close()
+                current_position += 1
+
+            logger.info(f"Успешно добавлено {len(tracks_data)} файлов в плейлист #{playlist_id}.")
+
+        except sqlite3.Error as e:
+            logger.error(f"Ошибка БД при добавлении в плейлист: {e}")
+            con_queue.rollback()
+
 
 
 def delete_playlist_track(track_id: int, playlist_id: int):
