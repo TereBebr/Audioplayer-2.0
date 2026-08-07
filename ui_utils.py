@@ -506,7 +506,7 @@ def add_track_to_playlist(cursor, playlist_id, track_id, insert_at=None):
     """, (playlist_id, track_id, new_position))
 
 
-def add_favorite(p, insert_at=None):
+def add_track_to_playlist(p, album_idx, insert_at=None):
     path = Path(p)
     files_to_add = []
 
@@ -518,19 +518,14 @@ def add_favorite(p, insert_at=None):
     elif path.is_file():
         if path.suffix.lower() in SUPPORTED_FORMATS:
             files_to_add.append(path)
-
     if not files_to_add:
         return
-
-    # ID плейлиста "Избранное". Убедитесь, что плейлист с ID=1 существует в таблице playlists!
-    FAVORITE_PLAYLIST_ID = 1 
     
     con_queue = sqlite3.connect('app.db')
     cursor = con_queue.cursor()
     
     try:
         current_insert_pos = insert_at
-
         for obj in files_to_add:
             try:
                 try:
@@ -538,8 +533,6 @@ def add_favorite(p, insert_at=None):
                 except Exception as e:
                     audio = utils.detect_and_load_audio(obj)
                     print(e)
-                # else:
-                #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
                 tags = utils.get_audio_tags(audio, obj)
                 name = tags["Название"] if tags.get("Название") else obj.name
@@ -561,7 +554,7 @@ def add_favorite(p, insert_at=None):
                 track_id = cursor.fetchone()[0]
                 
                 # 3. Привязываем трек к плейлисту "Избранное"
-                add_track_to_playlist(cursor, FAVORITE_PLAYLIST_ID, track_id, current_insert_pos)
+                add_track_to_playlist(cursor, album_idx, track_id, current_insert_pos)
                 
                 # Если вставляем по индексу, каждый следующий файл встает за предыдущим
                 if current_insert_pos is not None:
@@ -569,10 +562,8 @@ def add_favorite(p, insert_at=None):
                     
             except Exception as e:
                 print(f"Ошибка чтения файла {obj}: {e}")
-        
         con_queue.commit()
         print(f"Добавлено {len(files_to_add)} файлов в Избранное.")
-        
     except Exception as e:
         print(f"Ошибка БД при добавлении в Избранное: {e}")
         con_queue.rollback()
@@ -639,6 +630,30 @@ def dublicate_queue_track(track_id: int):
     except Exception as e:
         con.rollback()
         print(f"Ошибка вызова операции: {e}")
+    finally:
+        con.close()
+
+def delete_track_from_queue(e, track_id:int, play_btn_obj):
+    con = sqlite3.connect("queue.db")
+    cursor = con.cursor()
+
+    print(track_id)
+    if track_id == 0:
+        play_next_or_pred(e, True, play_btn_obj)
+        return
+    try:
+        cursor.execute("SELECT * FROM queue WHERE id = ?",(track_id,))
+        r = cursor.fetchone()
+        print(r)
+        if r:
+            cursor.execute('DELETE FROM queue WHERE id = ?', (track_id,))
+            cursor.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (track_id,))
+            con.commit()
+        else:
+            print(f"Трек с id={track_id} не найден в очереди.")
+    except Exception as er:
+        con.rollback()
+        print(f"Ошибка вызова операции: {er}")
     finally:
         con.close()
 

@@ -206,7 +206,7 @@ def App(page: ft.Page):
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, full_item_path, None),),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
-                                    ui_utils.add_favorite(p),
+                                    ui_utils.add_track_to_playlist(p, 1),
                                     playlist_ui(page, playlist_list, play_btn, 1)
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: (
@@ -345,7 +345,7 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_favorite(p),
+                                ui_utils.add_track_to_playlist(p, 1),
                                 playlist_ui(page, playlist_list, play_btn, 1)
                             ),
                         ),
@@ -354,8 +354,8 @@ def App(page: ft.Page):
                                 # rebuild_queue_ui(),
                             ),
                         ),
-                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, p=path: (
-                                # on_files_dropped(p),
+                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, id=track_id: (
+                                ui_utils.delete_track_from_queue(e, id, play_btn),
                                 rebuild_queue_ui(),
                             ),
                         ),
@@ -852,7 +852,7 @@ def App(page: ft.Page):
                             ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
                             ),
                             *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_favorite(p),
+                                ui_utils.add_track_to_playlist(p, 1),
                                 playlist_ui(page, playlist_list, play_btn, 1),)),]
                                 if playlist_id != 1
                                 else []
