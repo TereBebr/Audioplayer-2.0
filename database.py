@@ -54,6 +54,9 @@ def pl_app():
     cursor.execute("PRAGMA foreign_keys = ON;")
 
     try:
+        # Создать плейлист
+        cursor.execute(
+                    "INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",("Создать плейлист","storage/playlists_covers/add_playlist.png"))
         # Избранное
         cursor.execute(
             "INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",("Избранное","storage/playlists_covers/favorite.png"))

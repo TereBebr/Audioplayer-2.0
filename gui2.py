@@ -132,7 +132,7 @@ match method_tracks_settings:
 
 # ============================
 
-playlist_id = -1
+playlist_id = 2
 
 
 def App(page: ft.Page):
@@ -178,7 +178,7 @@ def App(page: ft.Page):
                 ui_utils.add_track_to_playlist(track_path, alb)
             print(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
             close_dialog(e)
-            playlist_ui(page, playlist_list, play_btn, 1)
+            playlist_ui(page, playlist_list, play_btn, alb)
 
         def get_playlists(e):
             con_app = sqlite3.connect('app.db')
@@ -190,8 +190,9 @@ def App(page: ft.Page):
                 results = cursor.fetchall()
             
                 for playlist_id, name, cover_path in results:
-                    a = {"id": playlist_id, "name": name, "img": cover_path}
-                    albums.append(a)
+                    if playlist_id != 1:
+                        a = {"id": playlist_id, "name": name, "img": cover_path}
+                        albums.append(a)
                     
             except Exception as er:
                 print(f"Ошибка извлечения списка плейлистов {er}")
@@ -252,6 +253,67 @@ def App(page: ft.Page):
         dlg.open = True
         page.update()
 
+    def create_albums_dialog(page: ft.Page):
+            def close_dialog(e):
+                dlg.open = False
+                page.update()
+
+            def save_selection(e):
+                playlist_name = name_input.value.strip() if name_input.value else ""
+                cover_path = cover_input.value.strip() if cover_input.value else None
+                if not playlist_name:
+                    name_input.error_text = "Введите название"
+                    page.update()
+                    return
+                create_playlist_sql(playlist_name, cover_path)
+                update_albums_ui()
+                print(f"Альбом {playlist_name} успешно создан")
+                close_dialog(e)
+
+            def create_playlist_sql(playlist_name: str, cover_path=None):
+                if cover_path is None:
+                    cover_path = "storage/playlists_covers/default.png"
+                con_app = sqlite3.connect('app.db')
+                cursor = con_app.cursor()
+                try:
+                    cursor.execute("INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",
+                                (playlist_name, cover_path))
+                    con_app.commit()
+                except Exception as er:
+                        con_app.rollback()
+                        print(f"Ошибка создания плейлиста: {er}")
+                finally:
+                    con_app.close()
+                pass
+
+            name_input = ft.TextField(label="Название плейлиста", expand=True)
+            cover_input = ft.TextField(label="Путь к картинке (опционально)", expand=True)
+            
+            # Создаем диалог
+            dlg = ft.AlertDialog(
+                title=ft.Row([
+                    ft.Icon(ft.Icons.LIBRARY_MUSIC),
+                    ft.Text("Создание альбома")
+                ]),
+                content=ft.Container(
+                    width=250,
+                    height=150,
+                    content=ft.Column([
+                        name_input, 
+                        cover_input
+                    ], spacing=10),
+                ),
+                actions=[
+                    ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                    ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+
+            page.overlay.append(dlg)
+            dlg.open = True
+            page.update()
+
     # Динамический проводник
     def rebuild_explorer(items, current_dir):
         explorer_tree.controls.clear()
@@ -299,8 +361,8 @@ def App(page: ft.Page):
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, full_item_path, None),),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
-                                    ui_utils.add_track_to_playlist(p, 1),
-                                    playlist_ui(page, playlist_list, play_btn, 1)
+                                    ui_utils.add_track_to_playlist(p, 2),
+                                    playlist_ui(page, playlist_list, play_btn, 2)
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: show_albums_dialog(e, p)),
                             ],
@@ -435,8 +497,8 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_track_to_playlist(p, 1),
-                                playlist_ui(page, playlist_list, play_btn, 1)
+                                ui_utils.add_track_to_playlist(p, 2),
+                                playlist_ui(page, playlist_list, play_btn, 2)
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
@@ -666,7 +728,7 @@ def App(page: ft.Page):
             page.update()
             time.sleep(0.45)
         rebuild_callback()
-    
+
     queue_panel = ft.Container(
         content=ft.Column(
             spacing=0,
@@ -765,7 +827,7 @@ def App(page: ft.Page):
         try:
             cursor.execute("SELECT id, name, cover_path FROM playlists")
             results = cursor.fetchall()
-        
+
             ids = []
             names = []
             covers = []
@@ -774,13 +836,12 @@ def App(page: ft.Page):
                 names.append(row[1])
                 covers.append(row[2])
             return ids, names, covers
-        
+
         except sqlite3.OperationalError as e:
             print(f"Ошибка БД: app #01")
             return [], [], []
         finally:
             con_app.close()
-
     playlist_ids, playlist_names, playlist_images = rebuild_playlists_list()
 
     playlist_list = ft.ListView(
@@ -822,7 +883,17 @@ def App(page: ft.Page):
             con.rollback()
         finally:
             con.close()
-    def playlist_ui(page: ft.Page, playlist_list: ft.ListView, play_btn_obj, playlist_id: int = 1):   
+    def playlist_ui(page: ft.Page, playlist_list: ft.ListView, play_btn_obj, playlist_id: int = 2):
+        if playlist_id == 1:
+            create_albums_dialog(page)
+            con = sqlite3.connect("app.db")
+            cursor = con.cursor()
+            cursor.execute("SELECT id FROM playlists WHERE id = (SELECT MAX(id) FROM playlists)")
+            r = cursor.fetchone()
+            con.close()
+            print(r[0])
+            playlist_ui(page, playlist_list, play_btn_obj, r[0])
+
         playlist_list.controls.clear()
 
         # --- 1. ЗАГРУЗКА ДАННЫХ ПЛЕЙЛИСТА ---
@@ -938,16 +1009,16 @@ def App(page: ft.Page):
                             ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
                             ),
                             *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_track_to_playlist(p, 1),
-                                playlist_ui(page, playlist_list, play_btn, 1),)),]
-                                if playlist_id != 1
+                                ui_utils.add_track_to_playlist(p, 2),
+                                playlist_ui(page, playlist_list, play_btn, 2),)),]
+                                if playlist_id != 2
                                 else []
                             ),
                             ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                             *([ft.PopupMenuItem(content=ft.Text("Удалить из избранного"), on_click=lambda e, id=track_id:(
-                                ui_utils.delete_playlist_track(id, 1),
-                                playlist_ui(page, playlist_list, play_btn, 1),)),]
-                                if playlist_id == 1
+                                ui_utils.delete_playlist_track(id, 2),
+                                playlist_ui(page, playlist_list, play_btn, 2),)),]
+                                if playlist_id == 2
                                 else [
                                     ft.PopupMenuItem(content=ft.Text("Удалить из альбома")),
                                 ]
@@ -967,10 +1038,42 @@ def App(page: ft.Page):
         print(f"DEBUG: Найдено строк в базе: {len(rows)}")
         print(f"DEBUG: Элементов в playlist_list.controls: {len(playlist_list.controls)}")
         playlist_list.update()
-    
+
     page.update()
 
     rebuild_explorer(folder_items, p)
+
+    albums_row = ft.Row(scroll=ft.ScrollMode.HIDDEN, spacing=2)
+    def update_albums_ui():
+        # Получаем свежие данные из БД
+        p_ids, p_names, p_images = rebuild_playlists_list()
+        
+        # Очищаем старые элементы из строки
+        albums_row.controls.clear()
+        
+        # Заполняем строку актуальными данными
+        for p_id, name, img in zip(p_ids, p_names, p_images):
+            albums_row.controls.append(
+                ft.Container(
+                    content=ft.Image(
+                        src=img,
+                        width=50,
+                        height=50,
+                        fit="cover"
+                    ),
+                    on_click=lambda e, p_id=p_id: playlist_ui(page, playlist_list, play_btn, p_id),
+                    tooltip=name, 
+                    border_radius=12,
+                )
+            )
+        
+        # Обновляем только саму строку (если она уже добавлена на страницу)
+        # Если она еще не добавлена, игнорируем ошибку (или используем page.update())
+        try:
+            albums_row.update()
+        except Exception:
+            pass
+    update_albums_ui()
 
     switch_playlists_WZ_view =ft.Container(
         bgcolor=ft.Colors.RED_900,
@@ -1028,23 +1131,7 @@ def App(page: ft.Page):
                 ft.Container( # строка с альбомами 
                     height=50,
                     bgcolor=ft.Colors.RED_900,
-                    content=ft.Row(
-                        scroll=ft.ScrollMode.HIDDEN,
-                        spacing=2,
-                        controls=[
-                            ft.Container(
-                                content=ft.Image(
-                                    src=img,
-                                    width=50,
-                                    height=50,
-                                    fit="cover"
-                                ),
-                                on_click=lambda e, p_id=p_id: playlist_ui(page, playlist_list, play_btn, p_id),
-                                tooltip=name, 
-                                border_radius=5,
-                            ) for p_id, name, img in zip(playlist_ids, playlist_names, playlist_images)
-                        ]
-                    )
+                    content=albums_row
                 ),
                 ft.Container( # рабочая зона
                         bgcolor=ft.Colors.RED_800,
@@ -1347,9 +1434,9 @@ def App(page: ft.Page):
         )
     )
     if playlist_ids:
-        playlist_ui(page, playlist_list, play_btn, playlist_id=playlist_ids[0])
+        playlist_ui(page, playlist_list, play_btn, playlist_id=playlist_ids[1])
     else:
-        playlist_ui(page, playlist_list, play_btn, playlist_id=1)
+        playlist_ui(page, playlist_list, play_btn, playlist_id=2)
 
     def on_tags_changed(topic, message):
         track_title.value = message.get("Название", "Неизвестно")
