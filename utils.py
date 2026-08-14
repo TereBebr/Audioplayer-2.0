@@ -7,7 +7,9 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.mp4 import MP4
 from pathlib import Path
 import pathlib
+import logging
 
+logger = logging.getLogger(__name__)
 #ИМПОРТ И ПРОВЕРКА VLC СРАЗУ ПОСЛЕ ЗАГРУЗКИ ФАЙЛА ---
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,14 +23,14 @@ if os.path.exists(vlc_dll_path):
 try:
     import vlc
 except ImportError:
-    print("Ошибка: Библиотека python-vlc не установлена. Выполните: pip install python-vlc")
+    logger.debug("Ошибка: Библиотека python-vlc не установлена. Выполните: pip install python-vlc")
 
 # ---
 
 def import_VLC(base_dir):
     # Эта функция теперь просто проверяет, что всё ок
     if 'vlc' in globals():
-        print(f"VLC движок готов: {vlc_dir}")
+        logger.debug(f"VLC движок найден и готов к работе: {vlc_dir}")
     return vlc_dir
     
 def import_paths(base_dir,file_name): 
@@ -45,7 +47,7 @@ def tec_info(audio):
     if audio is None:
         return 0
     if not isinstance(audio, FileType):
-        print("Mutagen не поддерживает медиафайл")
+        logger.error("Mutagen не поддерживает медиафайл")
         return 0
     if isinstance(audio, MP3):
         return 1
@@ -184,6 +186,7 @@ def create_player(path, start_vol_val):
     media = instance.media_new(path)
     player.audio_set_volume(start_vol_val)
     player.set_media(media)
+    logger.debug("VLC Объект плеера создан")
     return player
 
 
@@ -225,7 +228,7 @@ def detect_and_load_audio(path):
     битый ID3-хвост перед настоящим fLaC-маркером).
     Файл на диске не модифицируется.
     """
-    print(f"⚠️ mutagen не смог прочитать файл штатно, анализируем содержимое: {path}")
+    logger.error(f"⚠️ mutagen не смог прочитать файл штатно, анализируем содержимое: {path}")
 
     with open(path, "rb") as f:
         data = f.read()
@@ -235,19 +238,19 @@ def detect_and_load_audio(path):
     if offset != -1:
         try:
             audio = FLAC(io.BytesIO(data[offset:]))
-            print(f"✅ Валидный FLAC-поток (смещение {offset}): {path}")
+            logger.debug(f"✅ Валидный FLAC-поток (смещение {offset}): {path}")
             return audio
         except Exception as e:
-            print(f"fLaC-маркер найден, но разбор не удался: {e}")
+            logger.debug(f"fLaC-маркер найден, но разбор не удался: {e}")
 
     # 2. Похоже, это MP3 под чужим расширением
     if find_mpeg_sync(data) != -1:
         try:
             audio = MP3(path)
-            print(f"✅ Файл на самом деле MP3 (переименован/не докодирован): {path}")
+            logger.debug(f"✅ Файл на самом деле MP3 (переименован/не докодирован): {path}")
             return audio
         except Exception as e:
-            print(f"MPEG sync найден, но MP3-парсер не справился: {e}")
+            logger.debug(f"MPEG sync найден, но MP3-парсер не справился: {e}")
 
-    print(f"❌ Формат не определён, будут использованы значения по умолчанию: {path}")
+    logger.error(f"❌ Формат не определён, будут использованы значения по умолчанию: {path}")
     return None

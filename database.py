@@ -1,4 +1,7 @@
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_queue():
     con_queue = sqlite3.connect('queue.db')
@@ -15,7 +18,7 @@ def create_queue():
     #connection.commit()
     #con_queue.close()
     con_queue.close()
-    print("queue.db инициализирована")
+    logger.debug("queue.db инициализирована")
 
 def pl_app():
     con_app = sqlite3.connect('app.db')
@@ -62,9 +65,9 @@ def pl_app():
             "INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",("Избранное","storage/playlists_covers/favorite.png"))
     except Exception as e:
         con_app.rollback()
-        print(f"Ошибка при создании плейлиста: {e}")
+        logger.debug(f"Ошибка при создании плейлиста: {e}")
         return -1
 
     con_app.commit()
     con_app.close()
-    print("app.db инициализирована")
+    logger.debug("app.db инициализирована")

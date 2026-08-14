@@ -11,6 +11,9 @@ tags = {"Название": "Выберите трек", "Автор": "", "Ал
 p = './music' #начальная папка
 folder_items = ui_utils.fnew_path(p) #обработчик для начальной папки
 
+import logging
+
+logger = logging.getLogger(__name__)
 #uicolor = ui_utils.rgba(255, 227, 185, 32) #argb по стандарту (255, 227, 185, 32) 
 #bgcolor
 
@@ -151,12 +154,12 @@ def App(page: ft.Page):
     fit="contain",
     )
 
-    async def on_files_dropped(path, insert):
+    async def on_files_dropped(path, insert_at):
         # path = e.path
-        await asyncio.to_thread(ui_utils.add_queue, path, insert)
+        await asyncio.to_thread(ui_utils.add_queue, path, insert_at)
         rebuild_queue_ui()
     async def _on_add_to_queue_click(p, i, e=None):
-        await on_files_dropped(p, i)
+        await on_files_dropped(p, insert_at=i)
 
     def show_albums_dialog(e, track_path):
         selected_albums = set()
@@ -176,7 +179,7 @@ def App(page: ft.Page):
         def save_selection(e):
             for alb in selected_albums:
                 ui_utils.add_track_to_playlist(track_path, alb)
-            print(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
+            logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
             close_dialog(e)
             playlist_ui(page, playlist_list, play_btn, alb)
 
@@ -195,7 +198,7 @@ def App(page: ft.Page):
                         albums.append(a)
                     
             except Exception as er:
-                print(f"Ошибка извлечения списка плейлистов {er}")
+                logger.error(f"Ошибка извлечения списка плейлистов {er}")
                 close_dialog(e)
             finally:
                 con_app.close()
@@ -267,7 +270,7 @@ def App(page: ft.Page):
                     return
                 create_playlist_sql(playlist_name, cover_path)
                 update_albums_ui()
-                print(f"Альбом {playlist_name} успешно создан")
+                logger.info(f"Альбом {playlist_name} успешно создан")
                 close_dialog(e)
 
             def create_playlist_sql(playlist_name: str, cover_path=None):
@@ -281,7 +284,7 @@ def App(page: ft.Page):
                     con_app.commit()
                 except Exception as er:
                         con_app.rollback()
-                        print(f"Ошибка создания плейлиста: {er}")
+                        logger.error(f"Ошибка создания плейлиста: {er}")
                 finally:
                     con_app.close()
                 pass
@@ -451,7 +454,7 @@ def App(page: ft.Page):
                 path = r[0] if r else None
                 con.commit()
             except Exception as ex:
-                print(f"Ошибка при обновлении очереди в БД: {ex}")
+                logger.error(f"Ошибка при обновлении очереди в БД: {ex}")
                 con.rollback()
             finally:
                 con.close()
@@ -538,7 +541,7 @@ def App(page: ft.Page):
                 # ВЕТКА 1: Бросили файл/папку (СТРОКА)
                 # ==========================================
                 if isinstance(src_data, str):
-                    on_files_dropped(src_data, insert_at=target_id)
+                    asyncio.create_task(on_files_dropped(src_data, insert_at=target_id))
                     
                     if target_id == 0:
                         con_q = sqlite3.connect('queue.db')
@@ -578,7 +581,7 @@ def App(page: ft.Page):
                             ui_utils.load_track(page, path, play_btn, 0)
 
                     except Exception as ex:
-                        print(f"Ошибка при вставке из плейлиста в очередь: {ex}")
+                        logger.error(f"Ошибка при вставке из плейлиста в очередь: {ex}")
                         con_q.rollback()
                     finally:
                         con_q.close()
@@ -623,7 +626,7 @@ def App(page: ft.Page):
                                 ui_utils.load_track(page, path_row[0], play_btn, 0)
 
                 except Exception as ex:
-                    print(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
+                    logger.error(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
                     con_queue.rollback()
                     return 
                 finally:
@@ -838,7 +841,7 @@ def App(page: ft.Page):
             return ids, names, covers
 
         except sqlite3.OperationalError as e:
-            print(f"Ошибка БД: app #01")
+            logger.error(f"Ошибка БД: app #01")
             return [], [], []
         finally:
             con_app.close()
@@ -879,7 +882,7 @@ def App(page: ft.Page):
 
             con.commit()
         except Exception as e:
-            print(f"Ошибка при обмене позиций в плейлисте: {e}")
+            logger.error(f"Ошибка при обмене позиций в плейлисте: {e}")
             con.rollback()
         finally:
             con.close()
@@ -891,7 +894,7 @@ def App(page: ft.Page):
             cursor.execute("SELECT id FROM playlists WHERE id = (SELECT MAX(id) FROM playlists)")
             r = cursor.fetchone()
             con.close()
-            print(r[0])
+            # print(r[0])
             playlist_ui(page, playlist_list, play_btn_obj, r[0])
 
         playlist_list.controls.clear()
@@ -920,13 +923,13 @@ def App(page: ft.Page):
                 cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)", 
                                (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
             except Exception as ex:
-                print(f"Ошибка БД очереди: {ex}")
+                logger.error(f"Ошибка БД очереди: {ex}")
             finally:
                 con_q.commit()
                 con_q.close()
                 
             ui_utils.load_track(e.page,t_path, play_btn_obj, 0)
-            print(f"файл: {t_path}")
+            logger.debug(f"файл: {t_path}")
             rebuild_queue_ui()
 
         def on_accept(e):
@@ -1035,8 +1038,8 @@ def App(page: ft.Page):
                 )
             )
             playlist_list.controls.append(drag_item)
-        print(f"DEBUG: Найдено строк в базе: {len(rows)}")
-        print(f"DEBUG: Элементов в playlist_list.controls: {len(playlist_list.controls)}")
+        logger.debug(f"Найдено строк в базе: {len(rows)}")
+        logger.debug(f"Элементов в playlist_list.controls: {len(playlist_list.controls)}")
         playlist_list.update()
 
     page.update()

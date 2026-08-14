@@ -101,7 +101,7 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
             audio = mutagen.File(path)
         except Exception as e:
             audio = utils.detect_and_load_audio(path)
-            print(e)
+            # print(e)
         
         # (ID3)
         if audio:
@@ -116,7 +116,7 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
                 raw_data = audio.pictures[0].data
 
     except Exception as e:
-        print(f"Ошибка при чтении тегов из {path}: {e}. Идет поиск обложки в папке")
+        logger.info(f"Ошибка при чтении тегов из {path}: {e}. Идет поиск обложки в папке")
 
     # === ШАГ 2: Сжатие для базы данных ===
     if raw_data:
@@ -135,7 +135,7 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
             return output_buffer.getvalue()
             
         except Exception as e:
-            print(f"Ошибка при сжатии картинки {path}: {e}")
+            logger.info(f"Ошибка при сжатии картинки {path}: {e}")
             # Если Pillow не смог прочитать байты (битая картинка), 
             # возвращаем оригинальные байты как страховку
             return raw_data
@@ -145,7 +145,7 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
             cover_path = os.path.join(folder_path, cover_name)
 
             if os.path.exists(cover_path):
-                print(f"Найдена локальная обложка: {cover_path}")
+                logger.info(f"Найдена локальная обложка: {cover_path}")
                 try:
                     image = Image.open(cover_path)
                     
@@ -157,8 +157,8 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
                     return output_buffer.getvalue()
                 
                 except Exception as e:
-                    print(f"Ошибка при обработке локального cover.jpg в папке {folder_path}: {e}")
-    print(f"Обложка для {path} не найдена ни в тегах, ни в папке.")
+                    logger.error(f"Ошибка при обработке локального cover.jpg в папке {folder_path}: {e}")
+    logger.debug(f"Обложка для {path} не найдена ни в тегах, ни в папке.")
     return None
 
 #Функции проводника ----
@@ -194,7 +194,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
         text = e.control.data
         p = Path(text).resolve()
         if p.is_dir():
-            print(f"папка: {p}")
+            logger.info(f"папка: {p}")
             new_items = fnew_path(p)
             rebuild_callback(new_items, p)    # Вызываем функцию перерисовки UI
         else:
@@ -203,10 +203,10 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
                 audio = mutagen.File(p)
             except Exception as e:
                 audio = utils.detect_and_load_audio(p)
-                print(e)
+                # print(e)
             
             if audio:
-                print("Файл успешно открыт:", audio.get('title'))
+                logger.debug("Файл успешно открыт:", audio.get('title'))
             # else:
             #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
@@ -222,7 +222,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             con_queue.close()
 
             load_track(e.page,p, play_btn_obj, 0)
-            print(f"файл: {p}")
+            logger.info(f"файл: {p}")
 
 def fnew_path(p):
     folder_items = get_folder_content(p)
@@ -240,7 +240,7 @@ def on_segment_click(e, target_path, rebuild_callback):
         new_items = get_folder_content(p) 
         rebuild_callback(new_items, p)
     else:
-        print(f"{p} не существует")
+        logger.info(f"{p} не существует")
 
 
 def on_dialog_result(directory_path, rebuild_callback):
@@ -251,7 +251,7 @@ def on_dialog_result(directory_path, rebuild_callback):
         new_items = get_folder_content(p) # Твоя функция чтения папки
         rebuild_callback(new_items, p)
     else:
-        print(f"Выбранная папка {p} не существует или недоступна")
+        logger.debug(f"Выбранная папка {p} не существует или недоступна")
 
 #Функции кнопок ----
 
@@ -288,7 +288,7 @@ def playpause_btn_ev(e, play_btn_obj):
                     #player.play()
                     #смена иконки
             except Exception as ex:
-                print(f"Нет id 0: {ex}")
+                logger.error(f"Нет id 0: {ex}")
                 pass
             #player.play()
             #смена иконки
@@ -312,8 +312,6 @@ def slider_event(e: ft.ControlEvent, time_label):
         time_label.update()
 
         curr_sec = sec
-    else:
-        print("!player")
     is_dragging = False
 
 def vol_slider_event(e, vol_label):
@@ -321,8 +319,6 @@ def vol_slider_event(e, vol_label):
         vol_label.value = int(e.control.value)
         vol_label.update()
         player.audio_set_volume(int(e.control.value))
-    else:
-        print("!player")
 
 #Логика воспроизведение аудио ----
 
@@ -401,9 +397,9 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
         # load_track сам сделает Path(real_path).resolve()
         load_track(e.page, real_path, play_btn_obj, idx)
     else:
-        print("В очереди нет треков для воспроизведения")
+        logger.info("В очереди нет треков для воспроизведения")
 
-def add_queue(p, insert_at=None): # <--- Добавили аргумент insert_at
+def add_queue(p, insert_at): # <--- Добавили аргумент insert_at
     path = Path(p)
     files_to_add = []
 
@@ -441,9 +437,9 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
                     audio = mutagen.File(obj)
                 except Exception as e:
                     audio = utils.detect_and_load_audio(obj)
-                    print(e)
+                    # print(e)
                 if audio:
-                    print("Файл успешно открыт:", audio.get('title'))
+                    logger.info("Файл успешно открыт:", audio.get('title'))
                 # else:
                 #     print("Ошибка: файл не удалось открыть даже после исправления.")
 
@@ -457,15 +453,15 @@ def add_queue(p, insert_at=None): # <--- Добавили аргумент inser
                     (current_id, name, author, str(obj), miniature))
                 current_id += 1
             except Exception as e:
-                print(f"Ошибка чтения файла {obj}: {e}")
+                logger.error(f"Ошибка чтения файла {obj}: {e}")
         
         con_queue.commit()
     except Exception as e:
-        print(f"Ошибка БД при добавлении в очередь: {e}")
+        logger.error(f"Ошибка БД при добавлении в очередь: {e}")
         con_queue.rollback()
     finally:
         con_queue.close()
-        print(f"Добавлено {len(files_to_add)} файлов.")
+        logger.info(f"Добавлено {len(files_to_add)} файлов.")
 
 def mix_queue(rebuild_queue):
     con = sqlite3.connect('queue.db')
@@ -609,7 +605,7 @@ def delete_playlist_track(track_id: int, playlist_id: int):
         con.commit()
     except Exception as e:
         con.rollback()
-        print(f"Ошибка при удалении трека из плейлиста: {e}")
+        logger.error(f"Ошибка при удалении трека из плейлиста: {e}")
     finally:
         con.close()
 
@@ -624,10 +620,10 @@ def dublicate_queue_track(track_id: int):
             cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?,?,?,?,?)",(track_id + 1, r[1],r[2],r[3],r[4]))
             con.commit()
         else:
-            print(f"Трек с id={track_id} не найден в очереди.")
+            logger.error(f"Трек с id={track_id} не найден в очереди.")
     except Exception as e:
         con.rollback()
-        print(f"Ошибка вызова операции: {e}")
+        logger.error(f"Ошибка вызова операции: {e}")
     finally:
         con.close()
 
@@ -635,23 +631,23 @@ def delete_track_from_queue(e, track_id:int, play_btn_obj):
     con = sqlite3.connect("queue.db")
     cursor = con.cursor()
 
-    print(track_id)
+    logger.info(track_id)
     if track_id == 0:
         play_next_or_pred(e, True, play_btn_obj)
         return
     try:
         cursor.execute("SELECT * FROM queue WHERE id = ?",(track_id,))
         r = cursor.fetchone()
-        print(r)
+        # print(r)
         if r:
             cursor.execute('DELETE FROM queue WHERE id = ?', (track_id,))
             cursor.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (track_id,))
             con.commit()
         else:
-            print(f"Трек с id={track_id} не найден в очереди.")
+            logger.error(f"Трек с id={track_id} не найден в очереди.")
     except Exception as er:
         con.rollback()
-        print(f"Ошибка вызова операции: {er}")
+        logger.error(f"Ошибка вызова операции: {er}")
     finally:
         con.close()
 
