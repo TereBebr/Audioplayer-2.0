@@ -10,13 +10,12 @@ def create_queue():
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS "queue" (
     "id" INTEGER NOT NULL,
+    "uid" INTEGER PRIMARY KEY AUTOINCREMENT,
 	"name"	TEXT NOT NULL,
 	"author" TEXT,
 	"path"	TEXT NOT NULL,
     "cov_bytes" BLOB
     ) ''')
-    #connection.commit()
-    #con_queue.close()
     con_queue.close()
     logger.debug("queue.db инициализирована")
 

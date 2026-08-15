@@ -221,7 +221,8 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             con_queue.commit()
             con_queue.close()
 
-            load_track(e.page,p, play_btn_obj, 0)
+            load_track(e.page, p, play_btn_obj, -2)  # было 0
+            # e.page.pubsub.send_all_on_topic("queue_advanced", 1)
             logger.info(f"файл: {p}")
 
 def fnew_path(p):
@@ -373,29 +374,33 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
 def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следующий, если False - предыдущий
     con_queue = sqlite3.connect('queue.db')
     cursor = con_queue.cursor()
-    if switch:
-        cursor.execute("SELECT path FROM queue WHERE id = 1")
-        r = cursor.fetchone()
-        idx = 1
-        if r:
-            cursor.execute("UPDATE queue SET id = id -1")
-    else:
-        cursor.execute("SELECT path FROM queue WHERE id = -1")
-        r = cursor.fetchone()
-        idx = 0
-        if r:
-            cursor.execute("UPDATE queue SET id = id +1")
-
-    # cursor.execute("SELECT path FROM queue WHERE id = 0")
-    # r = cursor.fetchone()
-            
-    con_queue.commit()
-    con_queue.close()
+    try:
+        if switch:
+            cursor.execute("SELECT path FROM queue WHERE id = 1")
+            r = cursor.fetchone()
+            idx = 1
+            if r:
+                cursor.execute("UPDATE queue SET id = id -1")
+        else:
+            cursor.execute("SELECT path FROM queue WHERE id = -1")
+            r = cursor.fetchone()
+            idx = -2  # было 0
+            if r:
+                cursor.execute("UPDATE queue SET id = id +1")            
+        con_queue.commit()
+    
+    except Exception as ex:
+        logger.error(f"Ошибка при переходе трека: {ex}")
+        con_queue.rollback()
+        return
+    finally:
+        con_queue.close()
     
     if r:
         real_path = r[0] # Берем строку из кортежа
         # load_track сам сделает Path(real_path).resolve()
         load_track(e.page, real_path, play_btn_obj, idx)
+        # e.page.pubsub.send_all_on_topic("queue_advanced", 1 if switch else -1)
     else:
         logger.info("В очереди нет треков для воспроизведения")
 
@@ -609,42 +614,43 @@ def delete_playlist_track(track_id: int, playlist_id: int):
     finally:
         con.close()
 
-def dublicate_queue_track(track_id: int):
+def dublicate_queue_track(track_uid: int):
     con = sqlite3.connect("queue.db")
     cursor = con.cursor()
     try:
-        cursor.execute("SELECT * FROM queue WHERE id = ?", (track_id,))
+        cursor.execute("SELECT * FROM queue WHERE uid = ?", (track_uid,))
         r = cursor.fetchone()
         if r:
-            cursor.execute("UPDATE queue SET id = id + 1 WHERE id > ?", (track_id,))
-            cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?,?,?,?,?)",(track_id + 1, r[1],r[2],r[3],r[4]))
+            cursor.execute("UPDATE queue SET id = id + 1 WHERE id > ?", (r[0],))
+            cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?,?,?,?,?)",(r[0] + 1, r[2],r[3],r[4],r[5]))
             con.commit()
         else:
-            logger.error(f"Трек с id={track_id} не найден в очереди.")
+            logger.error(f"Трек с uid={track_uid} не найден в очереди.")
     except Exception as e:
         con.rollback()
         logger.error(f"Ошибка вызова операции: {e}")
     finally:
         con.close()
 
-def delete_track_from_queue(e, track_id:int, play_btn_obj):
+def delete_track_from_queue(e, track_uid:int, play_btn_obj):
     con = sqlite3.connect("queue.db")
     cursor = con.cursor()
 
-    logger.info(track_id)
-    if track_id == 0:
-        play_next_or_pred(e, True, play_btn_obj)
-        return
+    # logger.info(track_uid)
     try:
-        cursor.execute("SELECT * FROM queue WHERE id = ?",(track_id,))
+        cursor.execute("SELECT * FROM queue WHERE uid = ?",(track_uid,))
         r = cursor.fetchone()
         # print(r)
         if r:
-            cursor.execute('DELETE FROM queue WHERE id = ?', (track_id,))
-            cursor.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (track_id,))
+            if r[0] == 0:
+                con.close()
+                play_next_or_pred(e, True, play_btn_obj)
+                return
+            cursor.execute('DELETE FROM queue WHERE uid = ?', (track_uid,))
+            cursor.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (r[0],))
             con.commit()
         else:
-            logger.error(f"Трек с id={track_id} не найден в очереди.")
+            logger.error(f"Трек с uid={track_uid} не найден в очереди.")
     except Exception as er:
         con.rollback()
         logger.error(f"Ошибка вызова операции: {er}")
@@ -687,8 +693,19 @@ def bg_ui_process(page: ft.Page, play_btn):
                     track_ended_handled = True
                     con_queue = sqlite3.connect('queue.db')
                     cursor = con_queue.cursor()
-                    cursor.execute("SELECT path FROM queue WHERE id = 1")
-                    r = cursor.fetchone()
+                    try:
+                        cursor.execute("SELECT path FROM queue WHERE id = 1")
+                        r = cursor.fetchone()
+                        if r:
+                            cursor.execute("UPDATE queue SET id = id - 1")
+                        con_queue.commit()
+                    except Exception as ex:
+                        logger.error(f"Ошибка при авто-переходе: {ex}")
+                        con_queue.rollback()
+                        r = None
+                    finally:
+                        con_queue.close()
+
                     if r:
                         cursor.execute("UPDATE queue SET id = id -1")
                         con_queue.commit()
@@ -697,6 +714,7 @@ def bg_ui_process(page: ft.Page, play_btn):
                         curr_sec = 0
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
+                        page.pubsub.send_all_on_topic("queue_advanced", 1)
                         track_ended_handled = False
                     else: #все кончилось включая очередь
                         # проверка последний ли это был трек

@@ -22,6 +22,7 @@ config = configparser.ConfigParser()
 config.read('config.txt', encoding='utf-8')
 # Конфиги =========
 start_vol_val = config.getint('Main Settings', 'start_vol_val')
+max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
 # =================
 
 config.read('ui_config.txt', encoding='utf-8')
@@ -439,16 +440,54 @@ def App(page: ft.Page):
         expand=True,
         # alignment=ft.MainAxisAlignment.START
     )
+
+    # def on_queue_advanced(topic, shift):
+    #     if shift > 0:
+    #         page.run_task(skip_track_with_animation, page, queue_list, remove_played_tracks_ui, shift)
+    #     else:
+    #         rebuild_queue_ui()  # переход назад — редкий случай, полный ребилд ок
+
+    # page.pubsub.subscribe_topic("queue_advanced", on_queue_advanced)
+
+    def remove_played_tracks_ui(count):
+        """Убирает первые `count` треков из UI без полного ребилда."""
+        for _ in range(min(count, len(queue_list.controls))):
+            queue_list.controls.pop(0)
+
+        if queue_list.controls:
+            new_first = queue_list.controls[0]
+            container = new_first.content.content  # DragTarget -> Draggable -> Container
+            container.border = ft.Border.all(2, ft.Colors.GREEN)
+            container.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
+            try:
+                row_controls = container.content.controls
+                column_control = row_controls[-1]
+                title_text = column_control.controls[0]
+                title_text.color = ft.Colors.GREEN
+            except Exception:
+                pass
+
+        queue_list.update()
     
-    def rebuild_queue_ui():
+    def rebuild_queue_ui(idx=None):
+        t0 = time.perf_counter()
         queue_list.controls.clear()
-        def on_track_click(clicked_id):
-            if clicked_id == 0:
-                return # Трек уже играет
+        def on_track_click(clicked_uid):
             con = sqlite3.connect('queue.db')
             cursor = con.cursor()
+            path = None
+            clicked_pos = None
             try:
-                cursor.execute("UPDATE queue SET id = id - ?", (clicked_id,))
+                cursor.execute("SELECT id FROM queue WHERE uid = ?", (clicked_uid,))
+                row = cursor.fetchone()
+                if row is None:
+                    return
+                clicked_pos = row[0]
+                if clicked_pos <= 0:
+                    return
+
+                cursor.execute("UPDATE queue SET id = id - ?", (clicked_pos,))
+                cursor.execute("DELETE FROM queue WHERE id < ?", (max_histlen,))
                 cursor.execute("SELECT path FROM queue WHERE id = 0")
                 r = cursor.fetchone()
                 path = r[0] if r else None
@@ -456,22 +495,25 @@ def App(page: ft.Page):
             except Exception as ex:
                 logger.error(f"Ошибка при обновлении очереди в БД: {ex}")
                 con.rollback()
+                return  # <-- явный выход при ошибке, ничего дальше не трогаем
             finally:
                 con.close()
-            
-            ui_utils.load_track(page, path, play_btn, clicked_id)
-            rebuild_queue_ui()
+
+            if path is None:
+                return
+            ui_utils.load_track(page, path, play_btn, clicked_pos)
+            # remove_played_tracks_ui(clicked_pos)
 
         con = sqlite3.connect('queue.db')
         cursor = con.cursor()
         # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
-        cursor.execute("SELECT id, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
+        cursor.execute("SELECT id, uid, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
         rows = cursor.fetchall()
         con.close()
 
         anim_config = ft.Animation(350, ft.AnimationCurve.EASE_OUT)
         for row in rows:
-            track_id, name, author, path, cov_bytes = row
+            track_id, track_uid, name, author, path, cov_bytes = row
             
             # 1. Визуальное оформление играющего трека (id == 0)
             is_playing = (track_id == 0)
@@ -494,8 +536,8 @@ def App(page: ft.Page):
                         ], spacing=queue_cell[3])
                     ]),
                     secondary_items=[
-                        ft.PopupMenuItem(content=ft.Text("Дублировать"), on_click=lambda e, id=track_id: (
-                                ui_utils.dublicate_queue_track(id),
+                        ft.PopupMenuItem(content=ft.Text("Дублировать"), on_click=lambda e, uid=track_uid: (
+                                ui_utils.dublicate_queue_track(uid),
                                 rebuild_queue_ui(),
                             ),
                         ),
@@ -505,11 +547,11 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
-                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, id=track_id: (
-                                ui_utils.delete_track_from_queue(e, id, play_btn),
-                                rebuild_queue_ui(),
-                            ),
+                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: (
+                            ui_utils.delete_track_from_queue(e, uid, play_btn),
+                            rebuild_queue_ui(),
                         ),
+                    ),
                     ]
                 ),
                 padding=queue_cell[4],
@@ -524,26 +566,35 @@ def App(page: ft.Page):
                 animate_opacity=anim_config,
                 animate_offset=anim_config,   # <--- Включаем анимацию сдвига
                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                data=track_id, # Сохраняем ID прямо в контейнер
+                data=track_uid,
                 on_click=lambda e: on_track_click(e.control.data)
             )
 
             # 2. Обработчик Drop (когда на этот элемент что-то бросают)
-            def on_accept(e):
+            async def on_accept(e):
                 src_control = page.get_control(e.src_id) # Элемент, который тащим
                 if src_control is None:
                     return
                 
                 src_data = src_control.data      # Это ID (int), путь (str) или словарь (dict)
-                target_id = e.control.data       # Место, куда бросили
+                target_uid = e.control.data       # теперь uid, не позиция
                 
                 # ==========================================
                 # ВЕТКА 1: Бросили файл/папку (СТРОКА)
                 # ==========================================
                 if isinstance(src_data, str):
-                    asyncio.create_task(on_files_dropped(src_data, insert_at=target_id))
-                    
-                    if target_id == 0:
+                    con_q = sqlite3.connect('queue.db')
+                    cur = con_q.cursor()
+                    cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
+                    row = cur.fetchone()
+                    con_q.close()
+                    if row is None:
+                        return
+                    target_pos = row[0]
+
+                    await on_files_dropped(src_data, insert_at=target_pos)
+
+                    if target_pos == 0:
                         con_q = sqlite3.connect('queue.db')
                         cur = con_q.cursor()
                         cur.execute("SELECT path FROM queue WHERE id = 0")
@@ -551,35 +602,33 @@ def App(page: ft.Page):
                         con_q.close()
                         if new_track:
                             ui_utils.load_track(page, new_track[0], play_btn, 0)
-                            
-                    rebuild_queue_ui()
-                    return # Прерываем функцию, дальше не идем
+                    return
 
                 # ==========================================
-                # ВЕТКА 2: Бросили трек ИЗ ПЛЕЙЛИСТА (СЛОВАРЬ)
+                # ВЕТКА 2: трек из плейлиста
                 # ==========================================
                 if isinstance(src_data, dict) and src_data.get("source") == "playlist":
-                    # ВАЖНО: Распаковываем 4 элемента, так как в drag_payload мы передавали 4!
                     name, author, path, cov_bytes = src_data["track_data"]
 
                     con_q = sqlite3.connect('queue.db')
                     cur = con_q.cursor()
                     try:
-                        # Сдвигаем треки очереди вниз, освобождая место target_id
-                        cur.execute("UPDATE queue SET id = id + 1 WHERE id >= ?", (target_id,))
-                        
-                        # Вставляем новый трек из плейлиста
+                        cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
+                        row = cur.fetchone()
+                        if row is None:
+                            con_q.close()
+                            return
+                        target_pos = row[0]
+
+                        cur.execute("UPDATE queue SET id = id + 1 WHERE id >= ?", (target_pos,))
                         cur.execute("""
                             INSERT INTO queue (id, name, author, path, cov_bytes)
                             VALUES (?, ?, ?, ?, ?)
-                        """, (target_id, name, author, path, cov_bytes))
-                        
+                        """, (target_pos, name, author, path, cov_bytes))
                         con_q.commit()
 
-                        # Если вставили на нулевое место — запускаем
-                        if target_id == 0:
+                        if target_pos == 0:
                             ui_utils.load_track(page, path, play_btn, 0)
-
                     except Exception as ex:
                         logger.error(f"Ошибка при вставке из плейлиста в очередь: {ex}")
                         con_q.rollback()
@@ -587,81 +636,63 @@ def App(page: ft.Page):
                         con_q.close()
 
                     rebuild_queue_ui()
-                    return # Прерываем функцию, дальше не идем
-
-                # ==========================================
-                # ВЕТКА 3: Перетаскивание ВНУТРИ ОЧЕРЕДИ (ЧИСЛО)
-                # ==========================================
-                src_id = src_data
-                if src_id == target_id:
                     return
 
-                # --- ОБНОВЛЕНИЕ БАЗЫ ДАННЫХ (ГИБРИДНАЯ ЛОГИКА) ---
+                # ==========================================
+                # ВЕТКА 3: реордер внутри очереди
+                # ==========================================
+                src_uid = src_data
+                if src_uid == target_uid:
+                    return
+
                 con_queue = sqlite3.connect('queue.db')
                 cursor = con_queue.cursor()
                 try:
-                    if target_id == 0:
-                        # ВЕТКА А: Бросили на 0 место (Вставка со сдвигом вниз)
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
-                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_id,))
-                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
-                        con_queue.commit()
+                    cursor.execute("SELECT uid, id FROM queue WHERE uid IN (?, ?)", (src_uid, target_uid))
+                    pos_by_uid = dict(cursor.fetchall())
+                    if src_uid not in pos_by_uid or target_uid not in pos_by_uid:
+                        return  # один из треков уже пропал (например, был скипнут за это время)
 
+                    src_pos = pos_by_uid[src_uid]
+                    target_pos = pos_by_uid[target_uid]
+
+                    if target_pos == 0:
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_pos,))
+                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_pos,))
+                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
+                    else:
+                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_pos,))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_pos, target_pos))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_pos,))
+                    con_queue.commit()
+
+                    if src_pos == 0 or target_pos == 0:
                         cursor.execute("SELECT path FROM queue WHERE id = 0")
                         path_row = cursor.fetchone()
                         if path_row:
                             ui_utils.load_track(page, path_row[0], play_btn, 0)
-
-                    else:
-                        # ВЕТКА Б: Бросили на любое другое место (Обычный Swap)
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_id,))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_id, target_id))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_id,))
-                        con_queue.commit()
-
-                        if src_id == 0:
-                            cursor.execute("SELECT path FROM queue WHERE id = 0")
-                            path_row = cursor.fetchone()
-                            if path_row:
-                                ui_utils.load_track(page, path_row[0], play_btn, 0)
-
                 except Exception as ex:
                     logger.error(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
                     con_queue.rollback()
-                    return 
+                    return
                 finally:
                     con_queue.close()
 
-                # --- ОБНОВЛЕНИЕ ИНТЕРФЕЙСА (анимация и смена мест) ---
-                src_index = None
-                target_index = None
-
+                # --- патчим UI по uid, не по позиции ---
+                src_index = target_index = None
                 for i, ctrl in enumerate(queue_list.controls):
-                    if ctrl.data == src_id:
+                    if ctrl.data == src_uid:
                         src_index = i
-                    elif ctrl.data == target_id:
+                    elif ctrl.data == target_uid:
                         target_index = i
 
                 if src_index is not None and target_index is not None:
-                    if target_id == 0:
-                        moved_control = queue_list.controls.pop(src_index)
-                        queue_list.controls.insert(0, moved_control)
+                    if target_pos == 0:
+                        moved = queue_list.controls.pop(src_index)
+                        queue_list.controls.insert(0, moved)
                     else:
                         queue_list.controls[src_index], queue_list.controls[target_index] = \
                             queue_list.controls[target_index], queue_list.controls[src_index]
-
-                    for i, ctrl in enumerate(queue_list.controls):
-                        ctrl.data = i                  
-                        ctrl.content.data = i          
-                        ctrl.content.content.data = i  
-
-                        is_playing = (i == 0)
-                        border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
-                        bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
-                        
-                        ctrl.content.content.border = ft.Border.all(2, border_color)
-                        ctrl.content.content.bgcolor = bg_color
-                    
                     queue_list.update()
 
             # 3. Визуальный отклик при взаимодействии
@@ -670,7 +701,7 @@ def App(page: ft.Page):
                 e.control.update()
 
             def on_leave(e):
-                is_playing_now = (e.control.data == 0)
+                is_playing_now = bool(queue_list.controls) and queue_list.controls[0] is e.control
                 border_col = ft.Colors.GREEN if is_playing_now else ft.Colors.TRANSPARENT
                 e.control.content.content.border = ft.Border.all(2, border_col)
                 e.control.update()
@@ -678,13 +709,13 @@ def App(page: ft.Page):
             # 4. Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
             drag_item = ft.DragTarget(
                 group="queue_drag", # ВАЖНО: Общая группа с проводником
-                data=track_id, # Сохраняем target_id в данных таргета для on_leave
+                data=track_uid, # Сохраняем target_id в данных таргета для on_leave
                 on_accept=on_accept,
                 on_will_accept=on_will_accept,
                 on_leave=on_leave,
                 content=ft.Draggable(
                     group="queue_drag",
-                    data=track_id, # Передаем ID при перетаскивании
+                    data=track_uid, # Передаем ID при перетаскивании
                     content=item_content,
                     content_when_dragging=ft.Container(
                         content=ft.Text(f"Перемещение: {name}", size=queue_cell[1]),
@@ -697,40 +728,42 @@ def App(page: ft.Page):
                 )
             )
             queue_list.controls.append(drag_item)
+
+        t1 = time.perf_counter()
         page.update()
-    def skip_track_with_animation(page, queue_list, rebuild_callback, idx):
+        t2 = time.perf_counter()
+        print(f"Построение контролов: {(t1-t0)*1000:.1f} мс, page.update(): {(t2-t1)*1000:.1f} мс")
+    
+    async def skip_track_with_animation(page, queue_list, remove_callback, idx):
         """
         Визуально уводит отыгравший трек влево и гасит его,
         плавно подсвечивает зелёным следующий трек,
-        смещает очередь вверх и затем обновляет UI.
+        затем убирает элементы из UI.
         """
         if len(queue_list.controls) > 0:
-            # 1. Берем ПЕРВЫЙ элемент и анимируем его (уводим влево)
             first_item = queue_list.controls[0]
             first_container = first_item.content.content
-            
+
             first_container.opacity = 0
             first_container.offset = ft.Offset(-1, 0)
             first_container.border = ft.Border.all(0, ft.Colors.TRANSPARENT)
 
-            # 2. Если есть СЛЕДУЮЩИЙ элемент, заранее красим его в активный
             if len(queue_list.controls) > 1:
                 next_item = queue_list.controls[1]
                 next_container = next_item.content.content
-                # next_container.border = ft.Border.all(2, ft.Colors.GREEN)
-                # next_container.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
                 try:
                     row_controls = next_container.content.controls
-                    column_control = row_controls[-1] 
-                    title_text = column_control.controls[0] 
+                    column_control = row_controls[-1]
+                    title_text = column_control.controls[0]
                     if idx == 1:
                         title_text.color = ft.Colors.GREEN
                 except Exception:
                     pass
-            # Запускаем анимацию на фронтенде
+
             page.update()
-            time.sleep(0.45)
-        rebuild_callback()
+            await asyncio.sleep(0.45)
+
+        remove_callback(idx if idx else 1) #(idx if idx else 1)
 
     queue_panel = ft.Container(
         content=ft.Column(
@@ -750,7 +783,7 @@ def App(page: ft.Page):
         border_radius=RBOX_b_radius,
         bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
     )
-    skip_track_with_animation(page, queue_list, rebuild_queue_ui, 0)
+    page.run_task(skip_track_with_animation,page, queue_list, rebuild_queue_ui, 0)
 
     # ListView с простым режимом прокрутки
     path_row = ft.Row(
@@ -1453,9 +1486,8 @@ def App(page: ft.Page):
         if idx == -2: #-2 для случая, когда трек загружается первым, чтобы не дергать анимацию
             rebuild_queue_ui()
         else:
-            skip_track_with_animation(page, queue_list, rebuild_queue_ui, idx)
-
-        page.update()
+            page.run_task(skip_track_with_animation, page, queue_list, remove_played_tracks_ui, idx)
+        # page.update()
 
     def on_playback_update(topic, message):
         curr_s = message.get("curr_sec", 0)
