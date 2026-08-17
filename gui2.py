@@ -441,14 +441,6 @@ def App(page: ft.Page):
         # alignment=ft.MainAxisAlignment.START
     )
 
-    # def on_queue_advanced(topic, shift):
-    #     if shift > 0:
-    #         page.run_task(skip_track_with_animation, page, queue_list, remove_played_tracks_ui, shift)
-    #     else:
-    #         rebuild_queue_ui()  # переход назад — редкий случай, полный ребилд ок
-
-    # page.pubsub.subscribe_topic("queue_advanced", on_queue_advanced)
-
     def remove_played_tracks_ui(count):
         """Убирает первые `count` треков из UI без полного ребилда."""
         for _ in range(min(count, len(queue_list.controls))):

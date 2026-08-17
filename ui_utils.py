@@ -691,40 +691,41 @@ def bg_ui_process(page: ft.Page, play_btn):
                 # elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
                 elif state == vlc.State.Ended and not track_ended_handled:
                     track_ended_handled = True
-                    con_queue = sqlite3.connect('queue.db')
-                    cursor = con_queue.cursor()
+                    r = None
+
                     try:
-                        cursor.execute("SELECT path FROM queue WHERE id = 1")
-                        r = cursor.fetchone()
-                        if r:
-                            cursor.execute("UPDATE queue SET id = id - 1")
-                        con_queue.commit()
+                        # 1. Открываем соединение с таймаутом ожидания блокировки
+                        with sqlite3.connect('queue.db', timeout=10.0) as con_queue:
+                            con_queue.execute("PRAGMA journal_mode=WAL;")
+                            cursor = con_queue.cursor()
+
+                            # 2. Получаем текущий трек
+                            cursor.execute("SELECT path FROM queue WHERE id = 1")
+                            r = cursor.fetchone()
+
+                            if r:
+                                # Сдвигаем очередь
+                                cursor.execute("UPDATE queue SET id = id - 1")
+                            else:
+                                # Если id = 1 не найден, проверяем, есть ли другие треки
+                                cursor.execute("SELECT MAX(id) FROM queue")
+                                max_id_row = cursor.fetchone()
+                                
+                                if max_id_row and max_id_row[0] and max_id_row[0] > 0:
+                                    cursor.execute("UPDATE queue SET id = id - 1 WHERE id > 1")
+
                     except Exception as ex:
                         logger.error(f"Ошибка при авто-переходе: {ex}")
-                        con_queue.rollback()
                         r = None
-                    finally:
-                        con_queue.close()
 
+                    # 3. Работа с интерфейсом/VLC происходит ПОСЛЕ закрытия соединения с БД
                     if r:
-                        cursor.execute("UPDATE queue SET id = id -1")
-                        con_queue.commit()
-                        con_queue.close()
                         real_path = r[0]
                         curr_sec = 0
                         total_sec = 0
                         load_track(page, real_path, play_btn, 1)
                         page.pubsub.send_all_on_topic("queue_advanced", 1)
                         track_ended_handled = False
-                    else: #все кончилось включая очередь
-                        # проверка последний ли это был трек
-                        cursor.execute("SELECT * FROM queue WHERE id = (SELECT MAX(id) FROM queue)")
-                        l = cursor.fetchone()
-                        if l[0] > 0: # треки еще есть
-                             cursor.execute("UPDATE queue SET id = id -1 WHERE id > 1")
-                        con_queue.commit()
-                        con_queue.close()
-                        pass
                 
             time.sleep(upd_time)
     threading.Thread(target=run, daemon=True).start()
