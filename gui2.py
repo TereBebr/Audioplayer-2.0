@@ -319,7 +319,15 @@ def App(page: ft.Page):
             page.update()
 
     # Динамический проводник
-    def rebuild_explorer(items, current_dir):
+    def rebuild_explorer(items, current_dir, is_search=False):
+        if not is_search:
+            explorer_tree.all_items = items
+            explorer_tree.current_dir = current_dir
+            # Очищаем поле поиска при переходе в новую папку
+            if search_input.value != "":
+                search_input.value = ""
+                search_input.update()
+
         explorer_tree.controls.clear()
         current_dir = Path(current_dir).resolve()
 
@@ -332,7 +340,7 @@ def App(page: ft.Page):
             pass
         # ----------------------------------------------------------------
         current_dir = Path(current_dir).resolve()
-        start_dir = Path(p).resolve()
+        start_dir = Path(current_dir).resolve()
         current_path = Path(items[0]["path"]).parent if items else None
 
         explorer_tree.controls.append( #Верхняя кнопка
@@ -347,10 +355,11 @@ def App(page: ft.Page):
                 )
         )
 
-        if not items: #если папка пустая
+        if not items: # Если папка пустая или поиск ничего не нашел
+            empty_text = "Ничего не найдено" if is_search else "Папка пуста"
             explorer_tree.controls.append(
                 ft.Container(
-                    content=ft.Text("Папка пуста", size=12, color="gray", italic=True),
+                    content=ft.Text(empty_text, size=12, color="gray", italic=True),
                     padding=10
                 )
             )
@@ -789,7 +798,7 @@ def App(page: ft.Page):
         wrap=False
     )
 
-    def handle_pick_folder(e):
+    def handle_pick_folder(e): # изменить
         import tkinter as tk
         from tkinter import filedialog
 
@@ -813,13 +822,40 @@ def App(page: ft.Page):
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
 
+    def perform_search(e):
+        """Функция активного поиска"""
+        query = e.control.value.lower().strip()
+
+        all_items = getattr(explorer_tree, "all_items", [])
+        current_dir = getattr(explorer_tree, "current_dir", "")
+        
+        if not query:
+            # Если поиск пуст, показываем все элементы
+            filtered_items = all_items
+        else:
+            filtered_items = [
+                item for item in all_items 
+                if query in item["name"].lower()
+            ]
+        rebuild_explorer(filtered_items, current_dir, is_search=bool(query))
+
+    search_input = ft.TextField(
+        hint_text="Поиск файлов...",
+        border=ft.InputBorder.NONE,
+        text_size=text_size,
+        dense=True,
+        content_padding=2,
+        cursor_color="amber",
+        on_change=perform_search # Вызов поиска при каждом изменении
+    )
+
     search_bar = ft.Container(
-        #content = ,
-        height=35,
+        content=search_input,
+        height=20,
         border=ft.Border.all(1, ft.Colors.with_opacity(search_barBorderOp, search_barBorderCol)),
         border_radius=search_bar_radius,
-        padding=5,
-        bgcolor=ft.Colors.with_opacity(search_barBGOp, search_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
+        padding=0, # Убрал padding, так как он есть внутри TextField
+        bgcolor=ft.Colors.with_opacity(search_barBGOp, search_barBGCol),
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
     # Объявления объектов -----
