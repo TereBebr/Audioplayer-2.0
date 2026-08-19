@@ -233,6 +233,32 @@ def fnew_path(p):
 def on_accept_drag(e): #Конец перетаскивания
      pass
 
+def open_file_folder(e, path):
+    try:
+        p = Path(path).resolve()
+        if p.is_dir():
+            # os.path.normpath(path)
+            os.startfile(p)
+        else:
+            os.startfile(p.parent)
+    except Exception as ex:
+            logger.error(f"Не найдена дирректория {path}")
+            return
+
+def open_file_in_player_explorer(e, path, rebuild_callback):
+    try:
+        p = Path(path).resolve()
+        if p.is_dir():
+            new_items = fnew_path(p)
+        else:
+            p = p.parent
+            new_items = fnew_path(p)
+    except Exception as ex:
+        logger.error(f"Не найдена директория {path}: {ex}")
+        return
+    rebuild_callback(new_items, p)
+
+
 #строка пути
 def on_segment_click(e, target_path, rebuild_callback):
     """Срабатывает при клике на сегмент (TextSpan) пути."""

@@ -369,6 +369,7 @@ def App(page: ft.Page):
                                     playlist_ui(page, playlist_list, play_btn, 2)
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: show_albums_dialog(e, p)),
+                                ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=full_item_path: ui_utils.open_file_folder(e, p)),
                             ],
                         content=ft.GestureDetector(
                             data=item["path"],
@@ -544,6 +545,8 @@ def App(page: ft.Page):
                             rebuild_queue_ui(),
                         ),
                     ),
+                    ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
                     ]
                 ),
                 padding=queue_cell[4],
@@ -1051,6 +1054,8 @@ def App(page: ft.Page):
                                     ft.PopupMenuItem(content=ft.Text("Удалить из альбома")),
                                 ]
                             ),
+                            ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                            ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
                         ]
                     ),
                     content_when_dragging=ft.Container(
