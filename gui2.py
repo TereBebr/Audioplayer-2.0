@@ -137,6 +137,9 @@ match method_tracks_settings:
 # ============================
 
 playlist_id = 2
+playlist_name = "Избранное"
+playlist_desk = ""
+playlist_cover_path = ""
 
 
 def App(page: ft.Page):
@@ -920,6 +923,56 @@ def App(page: ft.Page):
         auto_scroll=False
     )
 
+    playlist_title_text = ft.Text("", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
+    playlist_desc_text = ft.Text("", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
+
+    playlist_data = ft.Container(
+        height=100,
+        bgcolor=ft.Colors.RED_800,
+        content=ft.Row(
+            controls=[
+                ft.Container(
+                    height=100,
+                    width=100,
+                    bgcolor=ft.Colors.BLACK
+                ),
+                ft.Column(
+                    expand=4,
+                    spacing=3,
+                    controls=[
+                        ft.Container(
+                            bgcolor=ft.Colors.RED_700, 
+                            content=playlist_title_text
+                        ),
+                        ft.Container(
+                            bgcolor=ft.Colors.RED_600, 
+                            content=playlist_desc_text
+                        ),
+                    ]
+                ),
+                ft.Container( # кнопка play
+                    expand=1,
+                    content=ft.Image(
+                        src="assets/icons/play_ico_inac.png",
+                        width=30,
+                        height=30,
+                        fit="contain",
+                    ),
+                    alignment=ft.Alignment.BOTTOM_RIGHT,
+                    shape=ft.BoxShape.CIRCLE,
+                    animate=200,
+                    scale=1.0,
+                    animate_scale=ft.Animation(100, ft.AnimationCurve.EASE_OUT),
+                ),
+            ]
+        )
+    )
+
+    def update_playlist_data(title: str, desc: str, cover_path: str):
+        playlist_title_text.value = title
+        playlist_desc_text.value = desc
+        playlist_data.update()
+
     def shift_playlist_track_db(playlist_id, old_pos, new_pos):
         """Меняет местами два трека в плейлисте (Swap)"""
         if old_pos == new_pos:
@@ -952,17 +1005,31 @@ def App(page: ft.Page):
             con.rollback()
         finally:
             con.close()
-    def playlist_ui(page: ft.Page, playlist_list: ft.ListView, play_btn_obj, playlist_id: int = 2):
-        if playlist_id == 1:
+    def playlist_ui(page: ft.Page, playlist_list: ft.ListView, play_btn_obj, playlist_idl: int = 2):
+        global playlist_id, playlist_name, playlist_desk, playlist_cover_path
+        if playlist_idl == 1:
             create_albums_dialog(page)
             con = sqlite3.connect("app.db")
             cursor = con.cursor()
-            cursor.execute("SELECT id FROM playlists WHERE id = (SELECT MAX(id) FROM playlists)")
+            cursor.execute("SELECT id, name, desk, cover_path FROM playlists WHERE id = (SELECT MAX(id) FROM playlists)")
             r = cursor.fetchone()
             con.close()
-            # print(r[0])
+            playlist_name = r[1]
+            playlist_desk = r[2]
+            playlist_cover_path = r[3]
             playlist_ui(page, playlist_list, play_btn_obj, r[0])
-
+            return
+        if playlist_idl != playlist_id:
+            con = sqlite3.connect("app.db")
+            cursor = con.cursor()
+            cursor.execute("SELECT name, desk, cover_path FROM playlists WHERE id = ?", (playlist_idl,))
+            r = cursor.fetchone()
+            con.close()
+            playlist_id = playlist_idl
+            playlist_name = r[0]
+            playlist_desk = r[1]
+            playlist_cover_path = r[2]
+        update_playlist_data(playlist_name, playlist_desk, playlist_cover_path)
         playlist_list.controls.clear()
 
         # --- 1. ЗАГРУЗКА ДАННЫХ ПЛЕЙЛИСТА ---
@@ -974,7 +1041,7 @@ def App(page: ft.Page):
             JOIN tracks t ON pt.track_id = t.id
             WHERE pt.playlist_id = ? 
             ORDER BY pt.position; 
-        """, (playlist_id,))
+        """, (playlist_idl,))
         rows = cursor.fetchall()
         con.close()
 
@@ -1011,9 +1078,9 @@ def App(page: ft.Page):
                 src_pos = src_data["position"]
                 if src_pos != target_pos:
                     # Вызываем вспомогательную функцию сдвига (написана ниже)
-                    shift_playlist_track_db(playlist_id, src_pos, target_pos)
+                    shift_playlist_track_db(playlist_idl, src_pos, target_pos)
                     # Перерисовываем плейлист
-                    playlist_ui(page, playlist_list, play_btn, playlist_id)
+                    playlist_ui(page, playlist_list, play_btn, playlist_idl)
             
             # Сброс визуального выделения
             e.control.content.content.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
@@ -1081,14 +1148,14 @@ def App(page: ft.Page):
                             *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
                                 ui_utils.add_track_to_playlist(p, 2),
                                 playlist_ui(page, playlist_list, play_btn, 2),)),]
-                                if playlist_id != 2
+                                if playlist_idl != 2
                                 else []
                             ),
                             ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                             *([ft.PopupMenuItem(content=ft.Text("Удалить из избранного"), on_click=lambda e, id=track_id:(
                                 ui_utils.delete_playlist_track(id, 2),
                                 playlist_ui(page, playlist_list, play_btn, 2),)),]
-                                if playlist_id == 2
+                                if playlist_idl == 2
                                 else [
                                     ft.PopupMenuItem(content=ft.Text("Удалить из альбома")),
                                 ]
@@ -1147,59 +1214,13 @@ def App(page: ft.Page):
             pass
     update_albums_ui()
 
-    switch_playlists_WZ_view =ft.Container(
+    switch_playlists_WZ_view = ft.Container(
         bgcolor=ft.Colors.RED_900,
         expand=True,
         content=ft.Column(
             spacing = 5,
             controls=[
-                ft.Container( # Верхняя строка - название плейлиста, картинка и кнопка play
-                    # expand=3,
-                    height=100,
-                    bgcolor=ft.Colors.RED_800,
-                    content=ft.Row(
-                        #expand=True,
-                        #spacing=10,
-                        controls=[
-                            ft.Container(
-                                height=100,
-                                width=100,
-                                bgcolor=ft.Colors.BLACK
-                            ),
-                            ft.Column(
-                                expand=4,
-                                spacing=3,
-                                controls=[
-                                    ft.Container(
-                                        bgcolor=ft.Colors.RED_700,
-                                        content=ft.Text("Название плейлиста", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
-                                    ),
-                                    ft.Container(
-                                        bgcolor=ft.Colors.RED_600,
-                                        content=ft.Text("Текст", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,),
-                                    )
-                                ]
-                            ),
-                            ft.Container( #кнопка play
-                                expand=1,
-                                content = ft.Image(
-                                    src="assets/icons/play_ico_inac.png",
-                                    width=30,
-                                    height=30,
-                                    fit="contain",
-                                ),
-                                alignment=ft.Alignment.BOTTOM_RIGHT,
-                                shape = ft.BoxShape.CIRCLE,
-                                animate=200,
-                                scale=1.0,  # Изначальный размер (100%)
-                                animate_scale=ft.Animation(100, ft.AnimationCurve.EASE_OUT), # Анимация сжатия за 100мс
-
-                                # on_hover=ui_utils.change_color,
-                                # on_click = lambda e: ui_utils.playpause_btn_ev(e, play_btn),
-                            ),
-                        ]
-                    )
-                ),
+                playlist_data,
                 ft.Container( # строка с альбомами 
                     height=50,
                     bgcolor=ft.Colors.RED_900,
@@ -1209,7 +1230,7 @@ def App(page: ft.Page):
                         bgcolor=ft.Colors.RED_800,
                         content=playlist_list,
                         expand=True
-                    ),
+                ),
             ]
         )
     )
@@ -1506,9 +1527,9 @@ def App(page: ft.Page):
         )
     )
     if playlist_ids:
-        playlist_ui(page, playlist_list, play_btn, playlist_id=playlist_ids[1])
+        playlist_ui(page, playlist_list, play_btn, playlist_idl=playlist_ids[1])
     else:
-        playlist_ui(page, playlist_list, play_btn, playlist_id=2)
+        playlist_ui(page, playlist_list, play_btn, playlist_idl=2)
 
     def on_tags_changed(topic, message):
         track_title.value = message.get("Название", "Неизвестно")

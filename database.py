@@ -39,6 +39,7 @@ def pl_app():
     CREATE TABLE IF NOT EXISTS playlists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
+        desk TEXT,
         cover_path TEXT
     )""")
 
