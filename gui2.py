@@ -503,6 +503,7 @@ def App(page: ft.Page):
 
             if path is None:
                 return
+            # ui_utils.load_track(page, path, play_btn, -2)
             ui_utils.load_track(page, path, play_btn, clicked_pos)
             # remove_played_tracks_ui(clicked_pos)
 
@@ -605,7 +606,7 @@ def App(page: ft.Page):
                         new_track = cur.fetchone()
                         con_q.close()
                         if new_track:
-                            ui_utils.load_track(page, new_track[0], play_btn, 0)
+                            ui_utils.load_track(page, new_track[0], play_btn, -2)
                     return
 
                 # ==========================================
@@ -631,15 +632,16 @@ def App(page: ft.Page):
                         """, (target_pos, name, author, path, cov_bytes))
                         con_q.commit()
 
-                        if target_pos == 0:
-                            ui_utils.load_track(page, path, play_btn, 0)
                     except Exception as ex:
                         logger.error(f"Ошибка при вставке из плейлиста в очередь: {ex}")
                         con_q.rollback()
                     finally:
                         con_q.close()
 
-                    rebuild_queue_ui()
+                    if target_pos == 0:
+                        ui_utils.load_track(page, path, play_btn, -2)
+                    else:
+                        rebuild_queue_ui()
                     return
 
                 # ==========================================
@@ -661,20 +663,20 @@ def App(page: ft.Page):
                     target_pos = pos_by_uid[target_uid]
 
                     if target_pos == 0:
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_pos,))
+                        cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
                         cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_pos,))
-                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -999")
+                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -9999")
                     else:
-                        cursor.execute("UPDATE queue SET id = -999 WHERE id = ?", (src_pos,))
+                        cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
                         cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_pos, target_pos))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = -999", (target_pos,))
+                        cursor.execute("UPDATE queue SET id = ? WHERE id = -9999", (target_pos,))
                     con_queue.commit()
 
                     if src_pos == 0 or target_pos == 0:
                         cursor.execute("SELECT path FROM queue WHERE id = 0")
                         path_row = cursor.fetchone()
                         if path_row:
-                            ui_utils.load_track(page, path_row[0], play_btn, 0)
+                            ui_utils.load_track(page, path_row[0], play_btn, -2)
                 except Exception as ex:
                     logger.error(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
                     con_queue.rollback()
@@ -992,9 +994,10 @@ def App(page: ft.Page):
                 con_q.commit()
                 con_q.close()
                 
-            ui_utils.load_track(e.page,t_path, play_btn_obj, 0)
+            # ui_utils.load_track(e.page,t_path, play_btn_obj, 0)
+            ui_utils.load_track(e.page,t_path, play_btn_obj, -2)
             logger.debug(f"файл: {t_path}")
-            rebuild_queue_ui()
+            # rebuild_queue_ui()
 
         def on_accept(e):
             src_control = page.get_control(e.src_id)
