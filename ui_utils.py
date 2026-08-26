@@ -594,7 +594,98 @@ def add_track_to_playlist(p, playlist_id, insert_at=None):
             logger.error(f"Ошибка БД при добавлении в плейлист: {e}")
             con_queue.rollback()
 
+def add_playlist_to_queue(playlist_id, insert_at=None):
+    # 1. Получаем список треков из основной БД
+    with sqlite3.connect('app.db') as con_app:
+        cursor = con_app.cursor()
+        cursor.execute(
+            """SELECT t.name, t.author, t.path, t.cov_bytes
+               FROM tracks t
+               JOIN playlist_tracks pt ON t.id = pt.track_id
+               WHERE pt.playlist_id = ?
+               ORDER BY pt.position ASC""",
+            (playlist_id,)
+        )
+        tracks = cursor.fetchall()
 
+    if not tracks:
+        return
+
+    queue_records = []
+    for track in tracks:
+        default_name, default_author, raw_path, cov_bytes = track
+        path_obj = Path(raw_path)
+
+        try:
+            try:
+                audio = mutagen.File(path_obj)
+            except Exception:
+                audio = utils.detect_and_load_audio(path_obj)
+
+            tags = utils.get_audio_tags(audio, path_obj) if audio else {}
+            name = tags.get("Название") or default_name or path_obj.name
+            author = tags.get("Автор") or default_author or "Неизвестно"
+
+            queue_records.append((name, author, str(path_obj), cov_bytes))
+        except Exception as e:
+            logger.error(f"Ошибка обработки файла {path_obj}: {e}")
+
+    if not queue_records:
+        return
+
+    # 3. Вставляем элементы с учетом нумерации по полю id
+    with sqlite3.connect('queue.db') as con_queue:
+        cursor = con_queue.cursor()
+        num_new_tracks = len(queue_records)
+
+        if insert_at is None:
+            # Обычный добавление в конец: берем MAX(id), если очередь пуста — начинаем с 0
+            cursor.execute("SELECT MAX(id) FROM queue")
+            max_id = cursor.fetchone()[0]
+            start_id = 0 if max_id is None else max_id + 1
+        else:
+            start_id = insert_at
+            # Сдвигаем элементы с id >= insert_at на num_new_tracks вперед.
+            # ORDER BY id DESC предотвращает потенциальные коллизии в процессе обновления
+            cursor.execute("""UPDATE queue SET id = id + ? WHERE id >= ?""",(num_new_tracks, start_id))
+
+        # Подготавливаем кортежи для вставки: (id, name, author, path, cov_bytes)
+        records_to_insert = [
+            (start_id + idx, rec[0], rec[1], rec[2], rec[3])
+            for idx, rec in enumerate(queue_records)
+        ]
+
+        cursor.executemany(
+            "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+            records_to_insert
+        )
+
+    logger.info(f"Успешно добавлено {len(records_to_insert)} файлов в очередь.")
+
+def delete_playlist(playlist_id : int):
+    try:
+        with sqlite3.connect('app.db') as con:
+            con.execute("PRAGMA foreign_keys = ON")
+            con.execute("DELETE FROM playlists WHERE id = ?",(playlist_id,))
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка при удалении плейлиста: {e}")
+
+
+    cursor = con.cursor()
+    try:
+        cursor.execute("DELETE FROM playlists WHERE id = ?",(playlist_id,))
+    except Exception as e:
+        con.rollback()
+        logger.error(f"Ошибка при удалении плейлиста: {e}")
+
+    try:
+        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?",(playlist_id,))
+    except Exception as e:
+        con.rollback()
+        logger.error(f"Ошибка при удалении треков из плейлиста: {e}")
+    
+    finally:
+        con.close()
 
 def delete_playlist_track(track_id: int, playlist_id: int):
     con = sqlite3.connect('app.db')

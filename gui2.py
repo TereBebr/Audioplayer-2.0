@@ -321,6 +321,67 @@ def App(page: ft.Page):
             dlg.open = True
             page.update()
 
+    def change_albums_dialog(page: ft.Page, pl_id, pl_name, pl_cover_path):
+        def close_dialog(e):
+            dlg.open = False
+            page.update()
+
+        def save_selection(e, p_id):
+            playlist_name = name_input.value.strip() if name_input.value else pl_name
+            cover_path = cover_input.value.strip() if cover_input.value else None
+            if not playlist_name:
+                name_input.error_text = pl_name
+                page.update()
+                return
+            change_playlist_sql(p_id, playlist_name, cover_path)
+            update_albums_ui()
+            logger.info(f"Альбом {playlist_name} успешно изменен")
+            close_dialog(e)
+
+        def change_playlist_sql(id, playlist_name: str, cover_path=None):
+            if cover_path is None:
+                cover_path = "storage/playlists_covers/default.png"
+            con_app = sqlite3.connect('app.db')
+            cursor = con_app.cursor()
+            try:
+                cursor.execute("UPDATE playlists SET name = ?, cover_path = ? WHERE id = ?",
+                            (playlist_name, cover_path, id))
+                con_app.commit()
+            except Exception as er:
+                    con_app.rollback()
+                    logger.error(f"Ошибка изменения плейлиста: {er}")
+            finally:
+                con_app.close()
+            pass
+
+        name_input = ft.TextField(label=pl_name, expand=True)
+        cover_input = ft.TextField(label=pl_cover_path or "Путь к картинке (опционально)", expand=True)
+        
+        # Создаем диалог
+        dlg = ft.AlertDialog(
+            title=ft.Row([
+                ft.Icon(ft.Icons.LIBRARY_MUSIC),
+                ft.Text(f"Изменение альбома №{pl_id}")
+            ]),
+            content=ft.Container(
+                width=250,
+                height=150,
+                content=ft.Column([
+                    name_input, 
+                    cover_input
+                ], spacing=10),
+            ),
+            actions=[
+                ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                ft.ElevatedButton("Сохранить", on_click=lambda e: save_selection(e, p_id=pl_id), bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
     # Динамический проводник
     def rebuild_explorer(items, current_dir, is_search=False):
         if not is_search:
@@ -1192,19 +1253,41 @@ def App(page: ft.Page):
         
         # Заполняем строку актуальными данными
         for p_id, name, img in zip(p_ids, p_names, p_images):
-            albums_row.controls.append(
-                ft.Container(
+            card = ft.GestureDetector(
+                on_tap=lambda e, pid=p_id: playlist_ui(page, playlist_list, play_btn, pid),
+                content=ft.Container(
                     content=ft.Image(
                         src=img,
                         width=50,
                         height=50,
                         fit="cover"
                     ),
-                    on_click=lambda e, p_id=p_id: playlist_ui(page, playlist_list, play_btn, p_id),
                     tooltip=name, 
                     border_radius=12,
                 )
             )
+            if p_id == 2:
+                context_menu = ft.ContextMenu(
+                    secondary_items=[
+                        ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, id=p_id: (ui_utils.add_playlist_to_queue(id), rebuild_queue_ui()),),
+                    ],
+                    content=card
+                )
+            elif p_id >2:
+                context_menu = ft.ContextMenu(
+                    secondary_items=[
+                        ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=lambda e, id=p_id: (ui_utils.add_playlist_to_queue(id), rebuild_queue_ui()),),
+                        ft.PopupMenuItem(content=ft.Text("Редактировать плейлист"), on_click=lambda e, id=p_id, n=name, i=img: change_albums_dialog(page, id, n, i),),
+                        ft.PopupMenuItem(content=ft.Text("Удалить плейлист"), on_click=lambda e, id=p_id: (ui_utils.delete_playlist(id), update_albums_ui(),
+                            playlist_ui(page, playlist_list, play_btn, 2) if playlist_id == id else None),),
+                    ],
+                    content=card
+                )
+            else:
+                context_menu = card
+        
+            # Добавляем ContextMenu в список контролов
+            albums_row.controls.append(context_menu)
         
         # Обновляем только саму строку (если она уже добавлена на страницу)
         # Если она еще не добавлена, игнорируем ошибку (или используем page.update())
