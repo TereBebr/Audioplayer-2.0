@@ -707,6 +707,62 @@ def App(page: ft.Page):
                     else:
                         rebuild_queue_ui()
                     return
+                
+                # ==========================================
+                # ВЕТКА 2.5: весь плейлист целиком (с album-карточки)
+                # ==========================================
+                if isinstance(src_data, dict) and src_data.get("source") == "playlist_full":
+                    src_playlist_id = src_data["playlist_id"]
+
+                    con_app = sqlite3.connect('app.db')
+                    cur_app = con_app.cursor()
+                    cur_app.execute("""
+                        SELECT t.name, t.author, t.path, t.cov_bytes
+                        FROM playlist_tracks pt
+                        JOIN tracks t ON pt.track_id = t.id
+                        WHERE pt.playlist_id = ?
+                        ORDER BY pt.position
+                    """, (src_playlist_id,))
+                    tracks_to_add = cur_app.fetchall()
+                    con_app.close()
+
+                    if not tracks_to_add:
+                        return  # пустой плейлист — вставлять нечего
+
+                    con_q = sqlite3.connect('queue.db')
+                    cur = con_q.cursor()
+                    target_pos = None
+                    try:
+                        cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
+                        row = cur.fetchone()
+                        if row is None:
+                            return
+                        target_pos = row[0]
+
+                        n = len(tracks_to_add)
+                        # освобождаем n мест начиная с target_pos
+                        cur.execute("UPDATE queue SET id = id + ? WHERE id >= ?", (n, target_pos))
+
+                        for offset, (t_name, t_author, t_path, t_cov) in enumerate(tracks_to_add):
+                            cur.execute("""
+                                INSERT INTO queue (id, name, author, path, cov_bytes)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, (target_pos + offset, t_name, t_author, t_path, t_cov))
+
+                        con_q.commit()
+                    except Exception as ex:
+                        logger.error(f"Ошибка при вставке плейлиста в очередь: {ex}")
+                        con_q.rollback()
+                        return
+                    finally:
+                        con_q.close()
+
+                    if target_pos == 0:
+                        first_path = tracks_to_add[0][2]
+                        ui_utils.load_track(page, first_path, play_btn, -2)
+                    else:
+                        rebuild_queue_ui()
+                    return
 
                 # ==========================================
                 # ВЕТКА 3: реордер внутри очереди
@@ -1285,10 +1341,21 @@ def App(page: ft.Page):
                 )
             else:
                 context_menu = card
+
+            draggable_card = ft.Draggable(
+                group="queue_drag",
+                data={"source": "playlist_full", "playlist_id": p_id, "name": name},
+                content=context_menu,
+                content_when_dragging=ft.Container(
+                    content=ft.Text(f"Плейлист: {name}", size=12),
+                    padding=8,
+                    bgcolor=ft.Colors.INVERSE_SURFACE,
+                    border_radius=12,
+                    opacity=0.8
+                )
+            )
         
-            # Добавляем ContextMenu в список контролов
-            albums_row.controls.append(context_menu)
-        
+            albums_row.controls.append(draggable_card)
         # Обновляем только саму строку (если она уже добавлена на страницу)
         # Если она еще не добавлена, игнорируем ошибку (или используем page.update())
         try:
