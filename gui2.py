@@ -8,8 +8,6 @@ import os
 import sqlite3
 import time
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
-p = './music' #начальная папка
-folder_items = ui_utils.fnew_path(p) #обработчик для начальной папки
 
 import logging
 
@@ -23,6 +21,8 @@ config.read('config.txt', encoding='utf-8')
 # Конфиги =========
 start_vol_val = config.getint('Main Settings', 'start_vol_val')
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
+p = config.get('Main Settings', 'start_path', fallback='./music') # Начальная папка
+folder_items = ui_utils.fnew_path(p) # Oбработчик для начальной папки
 # =================
 
 config.read('ui_config.txt', encoding='utf-8')
