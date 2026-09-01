@@ -1309,7 +1309,7 @@ def App(page: ft.Page):
         
         # Заполняем строку актуальными данными
         for p_id, name, img in zip(p_ids, p_names, p_images):
-            card = ft.GestureDetector(
+            card_container = ft.GestureDetector(
                 on_tap=lambda e, pid=p_id: playlist_ui(page, playlist_list, play_btn, pid),
                 content=ft.Container(
                     content=ft.Image(
@@ -1320,8 +1320,15 @@ def App(page: ft.Page):
                     ),
                     tooltip=name, 
                     border_radius=12,
+                    border=ft.Border.all(2, ft.Colors.TRANSPARENT),
                 )
             )
+
+            card = ft.GestureDetector(
+                on_tap=lambda e, pid=p_id: playlist_ui(page, playlist_list, play_btn, pid),
+                content=card_container
+                )
+
             if p_id == 2:
                 context_menu = ft.ContextMenu(
                     secondary_items=[
@@ -1354,8 +1361,68 @@ def App(page: ft.Page):
                     opacity=0.8
                 )
             )
+
+        # --- Приём drop'а ---
+            if p_id >= 2:
+                def on_album_will_accept(e, container=card_container):
+                    container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+                    container.update()
+
+                def on_album_leave(e, container=card_container):
+                    container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+                    container.update()
+
+                def on_album_accept(e, target_playlist_id=p_id, container=card_container):
+                    src_control = page.get_control(e.src_id)
+                    if src_control is None:
+                        return
+                    src_data = src_control.data
+
+                    path_to_add = None
+
+                    if isinstance(src_data, str):
+                        # трек/папка из проводника
+                        path_to_add = src_data
+
+                    elif isinstance(src_data, dict) and src_data.get("source") == "playlist":
+                        # одиночный трек, перетащенный из карточки плейлиста
+                        path_to_add = src_data["track_data"][2]
+
+                    elif isinstance(src_data, int):
+                        # трек из очереди (там Draggable.data = track_uid)
+                        con_q = sqlite3.connect('queue.db')
+                        cur = con_q.cursor()
+                        cur.execute("SELECT path FROM queue WHERE uid = ?", (src_data,))
+                        row = cur.fetchone()
+                        con_q.close()
+                        if row:
+                            path_to_add = row[0]
+
+                    # dict source == "playlist_full" (кинули целый плейлист) — игнорируем
+
+                    container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+                    container.update()
+
+                    if path_to_add is None:
+                        return
+
+                    ui_utils.add_track_to_playlist(path_to_add, target_playlist_id)  # insert_at=None -> в конец
+
+                    if playlist_id == target_playlist_id:
+                        playlist_ui(page, playlist_list, play_btn, target_playlist_id)
+
+                item = ft.DragTarget(
+                    group="queue_drag",
+                    data=p_id,
+                    on_accept=on_album_accept,
+                    on_will_accept=on_album_will_accept,
+                    on_leave=on_album_leave,
+                    content=draggable_card
+                )
+            else:
+                item = draggable_card
         
-            albums_row.controls.append(draggable_card)
+            albums_row.controls.append(item)
         # Обновляем только саму строку (если она уже добавлена на страницу)
         # Если она еще не добавлена, игнорируем ошибку (или используем page.update())
         try:
