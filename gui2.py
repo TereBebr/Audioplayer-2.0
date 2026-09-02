@@ -5,6 +5,7 @@ import ui_utils
 from pathlib import Path
 from ui_utils import bg_ui_process
 import os
+import math
 import sqlite3
 from contextlib import closing
 import time
@@ -143,6 +144,184 @@ playlist_desk = ""
 playlist_cover_path = ""
 
 
+class VirtualList:
+    """Оконный ("виртуальный") рендер длинного списка в прокручиваемом ft.Column.
+
+    В контейнере одновременно живут только ячейки видимой области плюс буфер
+    сверху и снизу. Место остальных занимают две пустые распорки, поэтому
+    и высота полосы прокрутки, и позиция скролла остаются ровно такими же,
+    как если бы список был отрисован целиком.
+
+    Смысл: Flet при каждом update() сериализует и отправляет во Flutter все
+    контролы списка — вместе с байтами обложек. На 500 треках это ~1 с на
+    перерисовку. Окно из ~30 ячеек делает стоимость перерисовки постоянной
+    и не зависящей от длины очереди/плейлиста.
+
+    Контейнер обязан быть ft.Column со scroll, а не ft.ListView: ListView
+    выравнивает детей по общему item extent, из-за чего распорка на 27000px
+    занимает столько же, сколько обычная ячейка, и max_scroll_extent врёт
+    (проверено — ListView даёт 4332 там, где Column даёт честные 2862).
+
+    Требование к ячейке: её высота — ровно cell_height, а вертикальный зазор
+    задаётся нижним margin ячейки, а не spacing у контейнера (spacing
+    принудительно ставится в 0). Тогда шаг строки всегда cell_height + gap,
+    и арифметика распорок точная.
+
+    count_rows()              -> сколько всего строк
+    fetch_rows(offset, limit) -> строки окна (SQL с LIMIT/OFFSET)
+    build_row(index, row)     -> контрол ячейки
+    """
+
+    # сколько строк рендерим, пока не знаем реальную высоту области
+    ROWS_UNTIL_MEASURED = 25
+
+    # На сколько строк видимая область должна подойти к краю окна, чтобы
+    # запустить перерисовку. Без этого запаса окно пересчитывалось бы на
+    # каждую прокрученную строку: сам по себе update() стоит ~70 мс почти
+    # независимо от числа ячеек, так что экономить надо на числе update-ов,
+    # а не на размере окна.
+    EDGE_ROWS = 5
+
+    def __init__(self, list_view, cell_height, gap, count_rows, fetch_rows, build_row,
+                 buffer_rows=14, scroll_interval=100):
+        assert isinstance(list_view, ft.Column), "VirtualList работает только с ft.Column (см. докстроку)"
+        self.box = list_view
+        self.pitch = cell_height + gap
+        self.gap = gap
+        self.count_rows = count_rows
+        self.fetch_rows = fetch_rows
+        self.build_row = build_row
+        self.buffer = buffer_rows
+
+        self.total = 0
+        self.start = 0
+        self.end = 0
+        self._offset = 0.0
+        self._viewport = 0.0
+
+        self.box.spacing = 0
+        self.box.scroll_interval = scroll_interval
+        self.box.on_scroll = self._on_scroll
+        self.box.on_size_change = self._on_resize
+
+    # --- служебное -------------------------------------------------------
+
+    def cell_margin(self):
+        """Отступ, который ячейка обязана повесить на себя вместо spacing."""
+        return ft.Margin.only(bottom=self.gap)
+
+    def _spacer(self, rows):
+        return ft.Container(height=rows * self.pitch)
+
+    def _window_for(self, offset, viewport):
+        if self.total <= 0:
+            return 0, 0
+        if viewport > 0:
+            visible = math.ceil(viewport / self.pitch) + 1
+        else:
+            visible = self.ROWS_UNTIL_MEASURED
+        start = max(0, int(offset // self.pitch) - self.buffer)
+        end = min(self.total, start + visible + 2 * self.buffer)
+        # у конца списка окно упирается в total — подтягиваем начало обратно,
+        # иначе на последнем экране рендерится меньше строк, чем помещается
+        start = max(0, min(start, end - (visible + 2 * self.buffer)))
+        return start, end
+
+    def _safe_update(self):
+        try:
+            if self.box.page:
+                self.box.update()
+        except (AssertionError, RuntimeError) as ex:
+            logger.debug(f"VirtualList: update пропущен ({ex})")
+
+    # --- публичное -------------------------------------------------------
+
+    def render(self, update=True):
+        """Перерисовывает текущее окно."""
+        t0 = time.perf_counter()
+        controls = []
+        if self.start > 0:
+            controls.append(self._spacer(self.start))
+
+        if self.end > self.start:
+            rows = self.fetch_rows(self.start, self.end - self.start)
+            for i, row in enumerate(rows):
+                controls.append(self.build_row(self.start + i, row))
+
+        tail = self.total - self.end
+        if tail > 0:
+            controls.append(self._spacer(tail))
+
+        self.box.controls[:] = controls
+        if update:
+            self._safe_update()
+        logger.debug(f"VirtualList: окно {self.start}-{self.end} из {self.total}, "
+                     f"область {self._viewport:.0f}px, {(time.perf_counter()-t0)*1000:.1f} мс")
+
+    def refresh(self, to_top=False, update=True):
+        """Перечитывает количество строк и перерисовывает окно.
+
+        to_top=True — сбросить окно в начало (например, при смене плейлиста).
+        """
+        self.total = self.count_rows()
+        if to_top:
+            self._offset = 0.0
+        # если список укоротился, текущая позиция могла оказаться за концом
+        max_offset = max(0.0, self.total * self.pitch - self._viewport)
+        self._offset = min(self._offset, max_offset)
+        self.start, self.end = self._window_for(self._offset, self._viewport)
+        self.render(update=update)
+
+    def scrolled(self):
+        """Список реально прокручен вниз (а не стоит в начале)."""
+        return self._offset > 0
+
+    def rendered_row(self, index):
+        """Контрол строки index, если она сейчас в окне, иначе None."""
+        if not (self.start <= index < self.end):
+            return None
+        pos = index - self.start + (1 if self.start > 0 else 0)
+        if 0 <= pos < len(self.box.controls):
+            return self.box.controls[pos]
+        return None
+
+    # --- события ---------------------------------------------------------
+
+    def _window_is_stale(self):
+        """Видимая область подошла к краю отрисованного окна?"""
+        first = int(self._offset // self.pitch)
+        last = int((self._offset + self._viewport) // self.pitch)
+        # сверху: окно можно расширить, только если выше есть неотрисованные строки
+        if self.start > 0 and first - self.start < self.EDGE_ROWS:
+            return True
+        if self.end < self.total and self.end - last < self.EDGE_ROWS:
+            return True
+        return False
+
+    def _reflow(self, force=False):
+        if not force and not self._window_is_stale():
+            return
+        start, end = self._window_for(self._offset, self._viewport)
+        if (start, end) != (self.start, self.end):
+            self.start, self.end = start, end
+            self.render()
+
+    def _on_scroll(self, e):
+        if e.pixels is None:
+            return
+        self._offset = max(0.0, e.pixels)
+        if e.viewport_dimension:
+            self._viewport = e.viewport_dimension
+        self._reflow()
+
+    def _on_resize(self, e):
+        if not e.height or e.height == self._viewport:
+            return
+        self._viewport = e.height
+        # размер области поменялся — окно пересчитываем безусловно
+        self._reflow(force=True)
+
+
 def App(page: ft.Page):
     page.title = "App"
     page.assets_dir = "assets"
@@ -167,22 +346,18 @@ def App(page: ft.Page):
         await on_files_dropped(p, insert_at=i)
 
     def open_dialog(page, dlg):
-        """Показывает диалог. Парная к close_dialog: см. комментарий там."""
-        page.overlay.append(dlg)
-        dlg.open = True
-        page.update()
+        """Показывает диалог через штатный механизм Flet 0.85.
 
-    def close_dialog(page, dlg):
-        """Закрывает диалог и убирает его из overlay.
-
-        Без удаления каждый вызов диалога оставлял в page.overlay ещё один
-        мёртвый AlertDialog, и список рос всю сессию.
+        Не через page.overlay: положенный в overlay диалог рисуется, но не
+        попадает в стек диалогов страницы, и закрыть его потом нельзя —
+        dlg.open = False на него уже не действует. show_dialog кладёт диалог
+        в page._dialogs и сам убирает его оттуда после закрытия.
         """
-        dlg.open = False
-        page.update()
-        if dlg in page.overlay:
-            page.overlay.remove(dlg)
-            page.update()
+        page.show_dialog(dlg)
+
+    def close_dialog(page, dlg=None):
+        """Закрывает верхний открытый диалог (он у нас всегда один)."""
+        page.pop_dialog()
 
     def show_albums_dialog(e, track_path):
         selected_albums = set()
@@ -196,12 +371,15 @@ def App(page: ft.Page):
                 selected_albums.discard(album_id)
 
         def save_selection(e):
-            if selected_albums:
-                for alb in selected_albums:
-                    ui_utils.add_track_to_playlist(track_path, alb)
-                logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
-                playlist_ui(page, playlist_list, play_btn, alb)
-            close_dialog(page, dlg)
+            close_dialog(page, dlg)  # сначала закрыть, потом перестраивать UI
+            if not selected_albums:
+                return
+            for alb in selected_albums:
+                ui_utils.add_track_to_playlist(track_path, alb)
+            logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
+            # если добавляли в открытый сейчас плейлист — обновляем рабочую зону
+            if current_playlist["id"] in selected_albums:
+                playlist_ui(page, playlist_list, play_btn, current_playlist["id"])
 
         def get_playlists():
             albums = []
@@ -274,10 +452,13 @@ def App(page: ft.Page):
                     name_input.error_text = "Плейлист с таким именем уже есть"
                     page.update()
                     return
-                update_albums_ui()
-                logger.info(f"Альбом {new_name} успешно создан (#{new_id})")
-                open_new_playlist(new_id)
+                # Закрываем до перестройки списков: если оставить закрытие
+                # напоследок, любая ошибка в update_albums_ui/playlist_ui
+                # оставит диалог висеть на экране
                 close_dialog(page, dlg)
+                logger.info(f"Альбом {new_name} успешно создан (#{new_id})")
+                update_albums_ui()
+                open_new_playlist(new_id)
 
             def open_new_playlist(new_id):
                 global playlist_name, playlist_desk, playlist_cover_path, playlist_id
@@ -346,9 +527,9 @@ def App(page: ft.Page):
                 name_input.error_text = "Плейлист с таким именем уже есть"
                 page.update()
                 return
-            update_albums_ui()
+            close_dialog(page, dlg)  # сначала закрыть, потом перестраивать UI
             logger.info(f"Альбом {new_name} успешно изменен")
-            close_dialog(page, dlg)
+            update_albums_ui()
 
         def change_playlist_sql(id, new_name: str, cover_path=None):
             """Обновляет плейлист. False — имя занято или ошибка БД."""
@@ -520,12 +701,16 @@ def App(page: ft.Page):
         return spans
     path_text = ft.Text(spans=build_breadcrumbs(p), no_wrap=True)
 
-    queue_list = ft.ListView(
-        spacing=8,
-        scroll=ft.ScrollMode.AUTO, 
+    QUEUE_GAP = 8  # вертикальный зазор между ячейками очереди
+
+    # Column, а не ListView: только Column честно учитывает высоту распорок
+    # виртуального списка (см. VirtualList)
+    queue_list = ft.Column(
+        scroll=ft.ScrollMode.AUTO,
         expand=True,
-        # alignment=ft.MainAxisAlignment.START
     )
+
+    queue_anim = ft.Animation(350, ft.AnimationCurve.EASE_OUT)
 
     def queue_cell_title(container):
         """Достаёт Text с названием трека из ячейки очереди.
@@ -543,21 +728,13 @@ def App(page: ft.Page):
             return None
 
     def remove_played_tracks_ui(count):
-        """Убирает первые `count` треков из UI без полного ребилда."""
-        for _ in range(min(count, len(queue_list.controls))):
-            queue_list.controls.pop(0)
+        """Убирает отыгравшие треки из UI.
 
-        if queue_list.controls:
-            new_first = queue_list.controls[0]
-            container = new_first.content.content  # DragTarget -> Draggable -> Container
-            container.border = ft.Border.all(2, ft.Colors.GREEN)
-            container.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
-            title_text = queue_cell_title(container)
-            if title_text is not None:
-                title_text.color = ft.Colors.GREEN
+        При оконном рендере патчить controls вручную незачем: перерисовка
+        окна из ~30 ячеек дешевле и не рассинхронизируется с БД.
+        """
+        queue_vlist.refresh()
 
-        queue_list.update()
-    
     def delete_from_queue(e, uid):
         """Удаление трека из очереди с корректным обновлением UI.
 
@@ -570,330 +747,335 @@ def App(page: ft.Page):
         if not advanced:
             rebuild_queue_ui()
 
-    def rebuild_queue_ui(idx=None):
-        t0 = time.perf_counter()
-        queue_list.controls.clear()
-        def on_track_click(clicked_uid):
-            con = sqlite3.connect('queue.db')
-            cursor = con.cursor()
-            path = None
-            clicked_pos = None
+    # --- данные очереди для оконного рендера ---
+    # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
+
+    def queue_count():
+        r = ui_utils.db_query_one('queue.db', "SELECT COUNT(*) FROM queue WHERE id >= 0")
+        return r[0] if r else 0
+
+    def queue_fetch(offset, limit):
+        return ui_utils.db_query_all('queue.db',
+            """SELECT id, uid, name, author, path, cov_bytes FROM queue
+               WHERE id >= 0 ORDER BY id ASC LIMIT ? OFFSET ?""", (limit, offset))
+
+    def on_track_click(clicked_uid):
+        con = sqlite3.connect('queue.db')
+        cursor = con.cursor()
+        path = None
+        clicked_pos = None
+        try:
+            cursor.execute("SELECT id FROM queue WHERE uid = ?", (clicked_uid,))
+            row = cursor.fetchone()
+            if row is None:
+                return
+            clicked_pos = row[0]
+            if clicked_pos <= 0:
+                return
+
+            cursor.execute("UPDATE queue SET id = id - ?", (clicked_pos,))
+            cursor.execute("DELETE FROM queue WHERE id < ?", (max_histlen,))
+            cursor.execute("SELECT path FROM queue WHERE id = 0")
+            r = cursor.fetchone()
+            path = r[0] if r else None
+            con.commit()
+        except Exception as ex:
+            logger.error(f"Ошибка при обновлении очереди в БД: {ex}")
+            con.rollback()
+            return  # <-- явный выход при ошибке, ничего дальше не трогаем
+        finally:
+            con.close()
+
+        if path is None:
+            return
+        ui_utils.load_track(page, path, play_btn, clicked_pos)
+
+    # Обработчик Drop (когда на ячейку очереди что-то бросают).
+    # Определён один раз, а не на каждую ячейку: адресат берётся из e.control.data
+    async def queue_on_accept(e):
+        src_control = page.get_control(e.src_id) # Элемент, который тащим
+        if src_control is None:
+            return
+
+        src_data = src_control.data      # Это ID (int), путь (str) или словарь (dict)
+        target_uid = e.control.data       # теперь uid, не позиция
+
+        # ==========================================
+        # ВЕТКА 1: Бросили файл/папку (СТРОКА)
+        # ==========================================
+        if isinstance(src_data, str):
+            row = ui_utils.db_query_one('queue.db', "SELECT id FROM queue WHERE uid = ?", (target_uid,))
+            if row is None:
+                return
+            target_pos = row[0]
+
+            await on_files_dropped(src_data, insert_at=target_pos)
+
+            if target_pos == 0:
+                new_track = ui_utils.db_query_one('queue.db', "SELECT path FROM queue WHERE id = 0")
+                if new_track:
+                    ui_utils.load_track(page, new_track[0], play_btn, -2)
+            return
+
+        # ==========================================
+        # ВЕТКА 2: трек из плейлиста
+        # ==========================================
+        if isinstance(src_data, dict) and src_data.get("source") == "playlist":
+            name, author, path, cov_bytes = src_data["track_data"]
+
+            con_q = sqlite3.connect('queue.db')
+            cur = con_q.cursor()
             try:
-                cursor.execute("SELECT id FROM queue WHERE uid = ?", (clicked_uid,))
-                row = cursor.fetchone()
+                cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
+                row = cur.fetchone()
                 if row is None:
                     return
-                clicked_pos = row[0]
-                if clicked_pos <= 0:
-                    return
+                target_pos = row[0]
 
-                cursor.execute("UPDATE queue SET id = id - ?", (clicked_pos,))
-                cursor.execute("DELETE FROM queue WHERE id < ?", (max_histlen,))
-                cursor.execute("SELECT path FROM queue WHERE id = 0")
-                r = cursor.fetchone()
-                path = r[0] if r else None
-                con.commit()
+                cur.execute("UPDATE queue SET id = id + 1 WHERE id >= ?", (target_pos,))
+                cur.execute("""
+                    INSERT INTO queue (id, name, author, path, cov_bytes)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (target_pos, name, author, path, cov_bytes))
+                con_q.commit()
+
             except Exception as ex:
-                logger.error(f"Ошибка при обновлении очереди в БД: {ex}")
-                con.rollback()
-                return  # <-- явный выход при ошибке, ничего дальше не трогаем
-            finally:
-                con.close()
-
-            if path is None:
+                logger.error(f"Ошибка при вставке из плейлиста в очередь: {ex}")
+                con_q.rollback()
                 return
-            # ui_utils.load_track(page, path, play_btn, -2)
-            ui_utils.load_track(page, path, play_btn, clicked_pos)
-            # remove_played_tracks_ui(clicked_pos)
+            finally:
+                con_q.close()
 
-        # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
-        rows = ui_utils.db_query_all('queue.db',
-            "SELECT id, uid, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
+            if target_pos == 0:
+                ui_utils.load_track(page, path, play_btn, -2)
+            else:
+                rebuild_queue_ui()
+            return
 
-        anim_config = ft.Animation(350, ft.AnimationCurve.EASE_OUT)
-        for row in rows:
-            track_id, track_uid, name, author, path, cov_bytes = row
-            
-            # 1. Визуальное оформление играющего трека (id == 0)
-            is_playing = (track_id == 0)
-            border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
-            bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
+        # ==========================================
+        # ВЕТКА 2.5: весь плейлист целиком (с album-карточки)
+        # ==========================================
+        if isinstance(src_data, dict) and src_data.get("source") == "playlist_full":
+            src_playlist_id = src_data["playlist_id"]
 
-            # Попытка декодировать обложку (если она есть)
-            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
-            if cov_bytes is not None:
-                cover_img = ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
-                pass
-            
-            item_content = ft.Container(
-                content=ft.ContextMenu(
-                    content=ft.Row([
-                        cover_img,
-                        ft.Column([
-                            ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
-                            ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
-                        ], spacing=queue_cell[3])
-                    ]),
-                    secondary_items=[
-                        ft.PopupMenuItem(content=ft.Text("Дублировать"), on_click=lambda e, uid=track_uid: (
-                                ui_utils.dublicate_queue_track(uid),
-                                rebuild_queue_ui(),
-                            ),
+            tracks_to_add = ui_utils.db_query_all('app.db', """
+                SELECT t.name, t.author, t.path, t.cov_bytes
+                FROM playlist_tracks pt
+                JOIN tracks t ON pt.track_id = t.id
+                WHERE pt.playlist_id = ?
+                ORDER BY pt.position
+            """, (src_playlist_id,))
+
+            if not tracks_to_add:
+                return  # пустой плейлист — вставлять нечего
+
+            con_q = sqlite3.connect('queue.db')
+            cur = con_q.cursor()
+            target_pos = None
+            try:
+                cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
+                row = cur.fetchone()
+                if row is None:
+                    return
+                target_pos = row[0]
+
+                n = len(tracks_to_add)
+                # освобождаем n мест начиная с target_pos
+                cur.execute("UPDATE queue SET id = id + ? WHERE id >= ?", (n, target_pos))
+
+                for offset, (t_name, t_author, t_path, t_cov) in enumerate(tracks_to_add):
+                    cur.execute("""
+                        INSERT INTO queue (id, name, author, path, cov_bytes)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (target_pos + offset, t_name, t_author, t_path, t_cov))
+
+                con_q.commit()
+            except Exception as ex:
+                logger.error(f"Ошибка при вставке плейлиста в очередь: {ex}")
+                con_q.rollback()
+                return
+            finally:
+                con_q.close()
+
+            if target_pos == 0:
+                first_path = tracks_to_add[0][2]
+                ui_utils.load_track(page, first_path, play_btn, -2)
+            else:
+                rebuild_queue_ui()
+            return
+
+        # ==========================================
+        # ВЕТКА 3: реордер внутри очереди
+        # ==========================================
+        src_uid = src_data
+        if src_uid == target_uid:
+            return
+
+        con_queue = sqlite3.connect('queue.db')
+        cursor = con_queue.cursor()
+        try:
+            cursor.execute("SELECT uid, id FROM queue WHERE uid IN (?, ?)", (src_uid, target_uid))
+            pos_by_uid = dict(cursor.fetchall())
+            if src_uid not in pos_by_uid or target_uid not in pos_by_uid:
+                return  # один из треков уже пропал (например, был скипнут за это время)
+
+            src_pos = pos_by_uid[src_uid]
+            target_pos = pos_by_uid[target_uid]
+
+            if target_pos == 0:
+                cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
+                cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_pos,))
+                cursor.execute("UPDATE queue SET id = 0 WHERE id = -9999")
+            else:
+                cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
+                cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_pos, target_pos))
+                cursor.execute("UPDATE queue SET id = ? WHERE id = -9999", (target_pos,))
+            con_queue.commit()
+
+            if src_pos == 0 or target_pos == 0:
+                cursor.execute("SELECT path FROM queue WHERE id = 0")
+                path_row = cursor.fetchone()
+                if path_row:
+                    ui_utils.load_track(page, path_row[0], play_btn, -2)
+        except Exception as ex:
+            logger.error(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
+            con_queue.rollback()
+            return
+        finally:
+            con_queue.close()
+
+        # Раньше здесь вручную переставлялись контролы в queue_list; при оконном
+        # рендере проще и надёжнее перерисовать окно
+        rebuild_queue_ui()
+
+    def make_queue_drop_handlers(container, is_playing):
+        """Подсветка ячейки очереди при наведении перетаскиваемого объекта."""
+        def _on_will_accept(e):
+            container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+            container.update()
+
+        def _on_leave(e):
+            border_col = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
+            container.border = ft.Border.all(2, border_col)
+            container.update()
+
+        return _on_will_accept, _on_leave
+
+    def build_queue_cell(index, row):
+        track_id, track_uid, name, author, path, cov_bytes = row
+
+        # 1. Визуальное оформление играющего трека (id == 0)
+        is_playing = (track_id == 0)
+        border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
+        bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
+
+        # Попытка декодировать обложку (если она есть)
+        cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+        if cov_bytes is not None:
+            cover_img = ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+
+        item_content = ft.Container(
+            content=ft.ContextMenu(
+                content=ft.Row([
+                    cover_img,
+                    ft.Column([
+                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
+                        ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                    ], spacing=queue_cell[3])
+                ]),
+                secondary_items=[
+                    ft.PopupMenuItem(content=ft.Text("Дублировать"), on_click=lambda e, uid=track_uid: (
+                            ui_utils.dublicate_queue_track(uid),
+                            rebuild_queue_ui(),
                         ),
-                        ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_track_to_playlist(p, 2),
-                                playlist_ui(page, playlist_list, play_btn, 2)
-                            ),
+                    ),
+                    ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
+                            ui_utils.add_track_to_playlist(p, 2),
+                            playlist_ui(page, playlist_list, play_btn, 2)
                         ),
-                        ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
-                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
-                        ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
-                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
-                    ]
-                ),
-                padding=queue_cell[4],
-                border=ft.Border.all(2, border_color),
-                border_radius=queue_border_radius,
-                bgcolor=bg_color,
-                # --- ДОБАВЛЯЕМ ДЛЯ АНИМАЦИИ ---
-                height=queue_cell[5],  # Фиксированная высота важна, чтобы Flet знал от чего "схлопывать"
-                opacity=1.0, # Явно указываем стартовую непрозрачность
-                offset=ft.Offset(0, 0), # Явно указываем стартовую позицию (на месте)
-                animate=anim_config,
-                animate_opacity=anim_config,
-                animate_offset=anim_config,   # <--- Включаем анимацию сдвига
-                clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                data=track_uid,
-                on_click=lambda e: on_track_click(e.control.data)
-            )
+                    ),
+                    ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
+                    ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
+                    ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
+                ]
+            ),
+            padding=queue_cell[4],
+            border=ft.Border.all(2, border_color),
+            border_radius=queue_border_radius,
+            bgcolor=bg_color,
+            # --- ДОБАВЛЯЕМ ДЛЯ АНИМАЦИИ ---
+            height=queue_cell[5],  # Фиксированная высота важна и для анимации, и для расчёта окна
+            margin=queue_vlist.cell_margin(), # зазор вместо ListView.spacing (см. VirtualList)
+            opacity=1.0, # Явно указываем стартовую непрозрачность
+            offset=ft.Offset(0, 0), # Явно указываем стартовую позицию (на месте)
+            animate=queue_anim,
+            animate_opacity=queue_anim,
+            animate_offset=queue_anim,   # <--- Включаем анимацию сдвига
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+            data=track_uid,
+            on_click=lambda e: on_track_click(e.control.data)
+        )
 
-            # 2. Обработчик Drop (когда на этот элемент что-то бросают)
-            async def on_accept(e):
-                src_control = page.get_control(e.src_id) # Элемент, который тащим
-                if src_control is None:
-                    return
-                
-                src_data = src_control.data      # Это ID (int), путь (str) или словарь (dict)
-                target_uid = e.control.data       # теперь uid, не позиция
-                
-                # ==========================================
-                # ВЕТКА 1: Бросили файл/папку (СТРОКА)
-                # ==========================================
-                if isinstance(src_data, str):
-                    row = ui_utils.db_query_one('queue.db', "SELECT id FROM queue WHERE uid = ?", (target_uid,))
-                    if row is None:
-                        return
-                    target_pos = row[0]
+        on_will_accept, on_leave = make_queue_drop_handlers(item_content, is_playing)
 
-                    await on_files_dropped(src_data, insert_at=target_pos)
-
-                    if target_pos == 0:
-                        new_track = ui_utils.db_query_one('queue.db', "SELECT path FROM queue WHERE id = 0")
-                        if new_track:
-                            ui_utils.load_track(page, new_track[0], play_btn, -2)
-                    return
-
-                # ==========================================
-                # ВЕТКА 2: трек из плейлиста
-                # ==========================================
-                if isinstance(src_data, dict) and src_data.get("source") == "playlist":
-                    name, author, path, cov_bytes = src_data["track_data"]
-
-                    con_q = sqlite3.connect('queue.db')
-                    cur = con_q.cursor()
-                    try:
-                        cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
-                        row = cur.fetchone()
-                        if row is None:
-                            con_q.close()
-                            return
-                        target_pos = row[0]
-
-                        cur.execute("UPDATE queue SET id = id + 1 WHERE id >= ?", (target_pos,))
-                        cur.execute("""
-                            INSERT INTO queue (id, name, author, path, cov_bytes)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (target_pos, name, author, path, cov_bytes))
-                        con_q.commit()
-
-                    except Exception as ex:
-                        logger.error(f"Ошибка при вставке из плейлиста в очередь: {ex}")
-                        con_q.rollback()
-                    finally:
-                        con_q.close()
-
-                    if target_pos == 0:
-                        ui_utils.load_track(page, path, play_btn, -2)
-                    else:
-                        rebuild_queue_ui()
-                    return
-                
-                # ==========================================
-                # ВЕТКА 2.5: весь плейлист целиком (с album-карточки)
-                # ==========================================
-                if isinstance(src_data, dict) and src_data.get("source") == "playlist_full":
-                    src_playlist_id = src_data["playlist_id"]
-
-                    tracks_to_add = ui_utils.db_query_all('app.db', """
-                        SELECT t.name, t.author, t.path, t.cov_bytes
-                        FROM playlist_tracks pt
-                        JOIN tracks t ON pt.track_id = t.id
-                        WHERE pt.playlist_id = ?
-                        ORDER BY pt.position
-                    """, (src_playlist_id,))
-
-                    if not tracks_to_add:
-                        return  # пустой плейлист — вставлять нечего
-
-                    con_q = sqlite3.connect('queue.db')
-                    cur = con_q.cursor()
-                    target_pos = None
-                    try:
-                        cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
-                        row = cur.fetchone()
-                        if row is None:
-                            return
-                        target_pos = row[0]
-
-                        n = len(tracks_to_add)
-                        # освобождаем n мест начиная с target_pos
-                        cur.execute("UPDATE queue SET id = id + ? WHERE id >= ?", (n, target_pos))
-
-                        for offset, (t_name, t_author, t_path, t_cov) in enumerate(tracks_to_add):
-                            cur.execute("""
-                                INSERT INTO queue (id, name, author, path, cov_bytes)
-                                VALUES (?, ?, ?, ?, ?)
-                            """, (target_pos + offset, t_name, t_author, t_path, t_cov))
-
-                        con_q.commit()
-                    except Exception as ex:
-                        logger.error(f"Ошибка при вставке плейлиста в очередь: {ex}")
-                        con_q.rollback()
-                        return
-                    finally:
-                        con_q.close()
-
-                    if target_pos == 0:
-                        first_path = tracks_to_add[0][2]
-                        ui_utils.load_track(page, first_path, play_btn, -2)
-                    else:
-                        rebuild_queue_ui()
-                    return
-
-                # ==========================================
-                # ВЕТКА 3: реордер внутри очереди
-                # ==========================================
-                src_uid = src_data
-                if src_uid == target_uid:
-                    return
-
-                con_queue = sqlite3.connect('queue.db')
-                cursor = con_queue.cursor()
-                try:
-                    cursor.execute("SELECT uid, id FROM queue WHERE uid IN (?, ?)", (src_uid, target_uid))
-                    pos_by_uid = dict(cursor.fetchall())
-                    if src_uid not in pos_by_uid or target_uid not in pos_by_uid:
-                        return  # один из треков уже пропал (например, был скипнут за это время)
-
-                    src_pos = pos_by_uid[src_uid]
-                    target_pos = pos_by_uid[target_uid]
-
-                    if target_pos == 0:
-                        cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
-                        cursor.execute("UPDATE queue SET id = id + 1 WHERE id >= 0 AND id < ?", (src_pos,))
-                        cursor.execute("UPDATE queue SET id = 0 WHERE id = -9999")
-                    else:
-                        cursor.execute("UPDATE queue SET id = -9999 WHERE id = ?", (src_pos,))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = ?", (src_pos, target_pos))
-                        cursor.execute("UPDATE queue SET id = ? WHERE id = -9999", (target_pos,))
-                    con_queue.commit()
-
-                    if src_pos == 0 or target_pos == 0:
-                        cursor.execute("SELECT path FROM queue WHERE id = 0")
-                        path_row = cursor.fetchone()
-                        if path_row:
-                            ui_utils.load_track(page, path_row[0], play_btn, -2)
-                except Exception as ex:
-                    logger.error(f"Ошибка БД при перетаскивании внутри очереди: {ex}")
-                    con_queue.rollback()
-                    return
-                finally:
-                    con_queue.close()
-
-                # --- патчим UI по uid, не по позиции ---
-                src_index = target_index = None
-                for i, ctrl in enumerate(queue_list.controls):
-                    if ctrl.data == src_uid:
-                        src_index = i
-                    elif ctrl.data == target_uid:
-                        target_index = i
-
-                if src_index is not None and target_index is not None:
-                    if target_pos == 0:
-                        moved = queue_list.controls.pop(src_index)
-                        queue_list.controls.insert(0, moved)
-                    else:
-                        queue_list.controls[src_index], queue_list.controls[target_index] = \
-                            queue_list.controls[target_index], queue_list.controls[src_index]
-                    queue_list.update()
-
-            # 3. Визуальный отклик при взаимодействии
-            def on_will_accept(e):
-                e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
-                e.control.update()
-
-            def on_leave(e):
-                is_playing_now = bool(queue_list.controls) and queue_list.controls[0] is e.control
-                border_col = ft.Colors.GREEN if is_playing_now else ft.Colors.TRANSPARENT
-                e.control.content.content.border = ft.Border.all(2, border_col)
-                e.control.update()
-
-            # 4. Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
-            drag_item = ft.DragTarget(
-                group="queue_drag", # ВАЖНО: Общая группа с проводником
-                data=track_uid, # Сохраняем target_id в данных таргета для on_leave
-                on_accept=on_accept,
-                on_will_accept=on_will_accept,
-                on_leave=on_leave,
-                content=ft.Draggable(
-                    group="queue_drag",
-                    data=track_uid, # Передаем ID при перетаскивании
-                    content=item_content,
-                    content_when_dragging=ft.Container(
-                        content=ft.Text(f"Перемещение: {name}", size=queue_cell[1]),
-                        padding=queue_cell[4],
-                        expand=True,
-                        bgcolor=ft.Colors.INVERSE_SURFACE,
-                        border_radius=queue_border_radius,
-                        opacity=0.8
-                    )
+        # Собираем матрешку: Target (зона дропа) -> Draggable (можно тащить) -> Container (внешний вид)
+        return ft.DragTarget(
+            group="queue_drag", # ВАЖНО: Общая группа с проводником
+            data=track_uid, # Сохраняем target_id в данных таргета для on_leave
+            on_accept=queue_on_accept,
+            on_will_accept=on_will_accept,
+            on_leave=on_leave,
+            content=ft.Draggable(
+                group="queue_drag",
+                data=track_uid, # Передаем ID при перетаскивании
+                content=item_content,
+                content_when_dragging=ft.Container(
+                    content=ft.Text(f"Перемещение: {name}", size=queue_cell[1]),
+                    padding=queue_cell[4],
+                    height=queue_cell[5],
+                    margin=queue_vlist.cell_margin(),
+                    bgcolor=ft.Colors.INVERSE_SURFACE,
+                    border_radius=queue_border_radius,
+                    opacity=0.8
                 )
             )
-            queue_list.controls.append(drag_item)
+        )
 
-        t1 = time.perf_counter()
-        page.update()
-        t2 = time.perf_counter()
-        print(f"Построение контролов: {(t1-t0)*1000:.1f} мс, page.update(): {(t2-t1)*1000:.1f} мс")
-    
+    queue_vlist = VirtualList(
+        queue_list,
+        cell_height=queue_cell[5],
+        gap=QUEUE_GAP,
+        count_rows=queue_count,
+        fetch_rows=queue_fetch,
+        build_row=build_queue_cell,
+    )
+
+    def rebuild_queue_ui(idx=None):
+        t0 = time.perf_counter()
+        queue_vlist.refresh()
+        logger.debug(f"Очередь: окно {queue_vlist.start}-{queue_vlist.end} из {queue_vlist.total} "
+                     f"за {(time.perf_counter()-t0)*1000:.1f} мс")
+
     async def skip_track_with_animation(page, queue_list, remove_callback, idx):
         """
         Визуально уводит отыгравший трек влево и гасит его,
         плавно подсвечивает зелёным следующий трек,
         затем убирает элементы из UI.
         """
-        if len(queue_list.controls) > 0:
-            first_item = queue_list.controls[0]
+        # Анимация имеет смысл, только если верх списка сейчас на экране:
+        # при прокрутке вниз первый контрол — это распорка, а не ячейка
+        first_item = queue_vlist.rendered_row(0)
+        if first_item is not None:
             first_container = first_item.content.content
 
             first_container.opacity = 0
             first_container.offset = ft.Offset(-1, 0)
             first_container.border = ft.Border.all(0, ft.Colors.TRANSPARENT)
 
-            if len(queue_list.controls) > 1 and idx == 1:
-                next_item = queue_list.controls[1]
-                next_container = next_item.content.content
-                title_text = queue_cell_title(next_container)
+            next_item = queue_vlist.rendered_row(1)
+            if next_item is not None and idx == 1:
+                title_text = queue_cell_title(next_item.content.content)
                 if title_text is not None:
                     title_text.color = ft.Colors.GREEN
 
@@ -1032,12 +1214,19 @@ def App(page: ft.Page):
         return ids, names, covers
     playlist_ids, playlist_names, playlist_images = rebuild_playlists_list()
 
-    playlist_list = ft.ListView(
+    PLAYLIST_GAP = 5  # вертикальный зазор между треками в рабочей зоне
+
+    # Column, а не ListView — по той же причине, что и очередь (см. VirtualList).
+    # padding у Column нет, он перенесён на контейнер рабочей зоны.
+    playlist_list = ft.Column(
         expand=True,
-        spacing=5,
-        padding=10,
-        auto_scroll=False
+        auto_scroll=False,
+        scroll=ft.ScrollMode.AUTO,  # без режима прокрутки не приходит on_scroll
     )
+
+    # Плейлист, открытый в рабочей зоне сейчас. Замыкания оконного рендера
+    # читают id отсюда, поэтому их не нужно пересоздавать при смене плейлиста.
+    current_playlist = {"id": 2}
 
     playlist_title_text = ft.Text("", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
     playlist_desc_text = ft.Text("", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
@@ -1121,7 +1310,186 @@ def App(page: ft.Page):
             con.rollback()
         finally:
             con.close()
-    def playlist_ui(page: ft.Page, playlist_list: ft.ListView, play_btn_obj, playlist_idl: int = 2):
+    # --- данные рабочей зоны для оконного рендера ---
+
+    async def scroll_list_to_top(lv):
+        """scroll_to в Flet 0.85 — корутина. Ошибку глушим: это косметика,
+        и уронить из-за неё обновление списка нельзя."""
+        try:
+            await lv.scroll_to(offset=0, duration=0)
+        except Exception as ex:
+            logger.debug(f"Не удалось прокрутить список наверх: {ex}")
+
+    def playlist_count():
+        r = ui_utils.db_query_one('app.db',
+            "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?", (current_playlist["id"],))
+        return r[0] if r else 0
+
+    def playlist_fetch(offset, limit):
+        return ui_utils.db_query_all('app.db', """
+            SELECT t.id, t.name, t.author, t.path, t.cov_bytes, pt.position
+            FROM playlist_tracks pt
+            JOIN tracks t ON pt.track_id = t.id
+            WHERE pt.playlist_id = ?
+            ORDER BY pt.position
+            LIMIT ? OFFSET ?
+        """, (current_playlist["id"], limit, offset))
+
+    def on_track_double_click(e):
+        t_id, t_name, t_author, t_path, t_cov = e.control.data
+
+        try:
+            with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_q:
+                # commit был в finally и срабатывал даже после ошибки —
+                # теперь транзакция откатывается, если вставка не прошла
+                with con_q:
+                    con_q.execute('DELETE FROM queue WHERE id = ?', (0,))
+                    con_q.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+                                  (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
+        except sqlite3.Error as ex:
+            logger.error(f"Ошибка БД очереди: {ex}")
+            return
+
+        ui_utils.load_track(e.page, t_path, play_btn, -2)
+        logger.debug(f"файл: {t_path}")
+
+    def make_drop_handlers(container):
+        """Обработчики drop'а, привязанные к Container конкретной строки.
+
+        Раньше рамка искалась как e.control.content.content, но там лежит
+        ContextMenu, а не Container: присваивание проходило молча и
+        подсветки не было вообще.
+        """
+        def _on_accept(e):
+            # Снимаем подсветку до возможного ребилда: после playlist_ui()
+            # этот контрол уже не в дереве и update() по нему упадёт
+            container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+            container.update()
+
+            src_control = page.get_control(e.src_id)
+            if src_control is None: return
+
+            src_data = src_control.data      # Что тащим (словарь с данными)
+            target_pos = e.control.data      # Куда бросаем (позиция)
+
+            # Если тянем трек из этого же плейлиста
+            if isinstance(src_data, dict) and src_data.get("source") == "playlist":
+                src_pos = src_data["position"]
+                if src_pos != target_pos:
+                    pl_id = current_playlist["id"]
+                    # Вызываем вспомогательную функцию сдвига (написана выше)
+                    shift_playlist_track_db(pl_id, src_pos, target_pos)
+                    # Перерисовываем плейлист
+                    playlist_ui(page, playlist_list, play_btn, pl_id)
+
+        def _on_will_accept(e):
+            container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+            container.update()
+
+        def _on_leave(e):
+            container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+            container.update()
+
+        return _on_accept, _on_will_accept, _on_leave
+
+    def build_playlist_cell(index, row):
+        track_id, name, author, path, cov_bytes, position = row
+        playlist_idl = current_playlist["id"]
+
+        cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=track_cell[0])
+        if cov_bytes is not None:
+            cover_img = ft.Image(src=cov_bytes, width=track_cell[0], height=track_cell[0])
+
+        # Сам контент трека. Здесь вешаем on_double_click
+        item_content = ft.Container(
+            content=ft.Row([
+                cover_img,
+                ft.Column([
+                    ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD),
+                    ft.Text(author, size=track_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                ], spacing=track_cell[3])
+            ]),
+            padding=track_cell[4],
+            border_radius=track_border_radius,
+            border=ft.Border.all(2, ft.Colors.TRANSPARENT), # Невидимая рамка для on_will_accept
+            height=track_cell[5],                  # фиксированная высота — основа расчёта окна
+            margin=playlist_vlist.cell_margin(),   # зазор вместо ListView.spacing
+        )
+
+        # Оборачиваем в GestureDetector для отслеживания двойного клика
+        item_wrapper = ft.GestureDetector(
+            on_double_tap=on_track_double_click,
+            data=(track_id, name, author, path, cov_bytes),
+            content=item_content
+        )
+
+        # Собираем Drag & Drop (Матрешка)
+        drag_payload = {
+            "source": "playlist",
+            "track_id": track_id,
+            "position": position,
+            "track_data": (name, author, path, cov_bytes)
+        }
+
+        on_accept, on_will_accept, on_leave = make_drop_handlers(item_content)
+
+        return ft.DragTarget(
+            group="queue_drag", # ОБЩАЯ ГРУППА для плейлиста и очереди
+            data=position,        # Таргет знает свою позицию
+            on_accept=on_accept,
+            on_will_accept=on_will_accept,
+            on_leave=on_leave,
+            content=ft.Draggable(
+                group="queue_drag",
+                data=drag_payload, # Передаем полный словарь, чтобы очередь поняла, что ей прилетело
+                content=ft.ContextMenu(
+                    content=item_wrapper,
+                    secondary_items=[
+                        ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
+                        ),
+                        *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
+                            ui_utils.add_track_to_playlist(p, 2),
+                            playlist_ui(page, playlist_list, play_btn, 2),)),]
+                            if playlist_idl != 2
+                            else []
+                        ),
+                        ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
+                        # Удаление из текущего плейлиста. Раньше вариант "Удалить
+                        # из альбома" был вообще без on_click, и из обычного
+                        # плейлиста трек убрать было нельзя
+                        ft.PopupMenuItem(
+                            content=ft.Text("Удалить из избранного" if playlist_idl == 2 else "Удалить из альбома"),
+                            on_click=lambda e, tid=track_id, pid=playlist_idl: (
+                                ui_utils.delete_playlist_track(tid, pid),
+                                playlist_ui(page, playlist_list, play_btn, pid),
+                            ),
+                        ),
+                        ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
+                    ]
+                ),
+                content_when_dragging=ft.Container(
+                    content=ft.Text(f"Перемещение: {name}", size=track_cell[1]),
+                    padding=track_cell[4],
+                    height=track_cell[5],
+                    margin=playlist_vlist.cell_margin(),
+                    bgcolor=ft.Colors.INVERSE_SURFACE,
+                    border_radius=track_border_radius,
+                    opacity=0.8
+                )
+            )
+        )
+
+    playlist_vlist = VirtualList(
+        playlist_list,
+        cell_height=track_cell[5],
+        gap=PLAYLIST_GAP,
+        count_rows=playlist_count,
+        fetch_rows=playlist_fetch,
+        build_row=build_playlist_cell,
+    )
+
+    def playlist_ui(page: ft.Page, playlist_list: ft.Column, play_btn_obj, playlist_idl: int = 2):
         global playlist_id, playlist_name, playlist_desk, playlist_cover_path
         if playlist_idl == 1:
             create_albums_dialog(page)
@@ -1134,160 +1502,21 @@ def App(page: ft.Page):
                 playlist_desk = r[1]
                 playlist_cover_path = r[2]
         update_playlist_data(playlist_name, playlist_desk, playlist_cover_path)
-        playlist_list.controls.clear()
 
-        # --- 1. ЗАГРУЗКА ДАННЫХ ПЛЕЙЛИСТА ---
-        rows = ui_utils.db_query_all('app.db', """
-            SELECT t.id, t.name, t.author, t.path, t.cov_bytes, pt.position
-            FROM playlist_tracks pt 
-            JOIN tracks t ON pt.track_id = t.id
-            WHERE pt.playlist_id = ? 
-            ORDER BY pt.position; 
-        """, (playlist_idl,))
+        # Сменили плейлист — прокрутку сбрасываем наверх, иначе (перерисовка
+        # того же плейлиста после drag&drop или удаления) остаёмся на месте
+        switched = (playlist_idl != current_playlist["id"])
+        current_playlist["id"] = playlist_idl
+        # Дёргать scroll_to, когда список и так в начале, не надо: на ещё не
+        # подключившемся клиенте вызов висит до таймаута и рвёт канал обновлений
+        need_scroll_top = switched and playlist_vlist.scrolled() and bool(playlist_list.page)
 
-        def on_track_double_click(e):
-            t_id, t_name, t_author, t_path, t_cov = e.control.data 
-            
-            try:
-                with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_q:
-                    # commit был в finally и срабатывал даже после ошибки —
-                    # теперь транзакция откатывается, если вставка не прошла
-                    with con_q:
-                        con_q.execute('DELETE FROM queue WHERE id = ?', (0,))
-                        con_q.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                                      (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
-            except sqlite3.Error as ex:
-                logger.error(f"Ошибка БД очереди: {ex}")
-                return
-
-            # ui_utils.load_track(e.page,t_path, play_btn_obj, 0)
-            ui_utils.load_track(e.page,t_path, play_btn_obj, -2)
-            logger.debug(f"файл: {t_path}")
-            # rebuild_queue_ui()
-
-        def make_drop_handlers(container):
-            """Обработчики drop'а, привязанные к Container конкретной строки.
-
-            Раньше рамка искалась как e.control.content.content, но там лежит
-            ContextMenu, а не Container: присваивание проходило молча и
-            подсветки не было вообще.
-            """
-            def _on_accept(e):
-                # Снимаем подсветку до возможного ребилда: после playlist_ui()
-                # этот контрол уже не в дереве и update() по нему упадёт
-                container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
-                container.update()
-
-                src_control = page.get_control(e.src_id)
-                if src_control is None: return
-
-                src_data = src_control.data      # Что тащим (словарь с данными)
-                target_pos = e.control.data      # Куда бросаем (позиция)
-
-                # Если тянем трек из этого же плейлиста
-                if isinstance(src_data, dict) and src_data.get("source") == "playlist":
-                    src_pos = src_data["position"]
-                    if src_pos != target_pos:
-                        # Вызываем вспомогательную функцию сдвига (написана ниже)
-                        shift_playlist_track_db(playlist_idl, src_pos, target_pos)
-                        # Перерисовываем плейлист
-                        playlist_ui(page, playlist_list, play_btn, playlist_idl)
-
-            def _on_will_accept(e):
-                container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
-                container.update()
-
-            def _on_leave(e):
-                container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
-                container.update()
-
-            return _on_accept, _on_will_accept, _on_leave
-
-        # --- 4. ОТРИСОВКА ИНТЕРФЕЙСА ---
-        for row in rows:
-            track_id, name, author, path, cov_bytes, position = row
-
-            cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=track_cell[0])
-            if cov_bytes is not None:
-                cover_img = ft.Image(src=cov_bytes, width=track_cell[0], height=track_cell[0])
-            
-            # Сам контент трека. Здесь вешаем on_double_click
-            item_content = ft.Container(
-                content=ft.Row([
-                    cover_img,
-                    ft.Column([
-                        ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD),
-                        ft.Text(author, size=track_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
-                    ], spacing=track_cell[3])
-                ]),
-                padding=track_cell[4],
-                border_radius=track_border_radius,
-                border=ft.Border.all(2, ft.Colors.TRANSPARENT) # Невидимая рамка для on_will_accept
-            )
-
-            # Оборачиваем в GestureDetector для отслеживания двойного клика
-            item_wrapper = ft.GestureDetector(
-                on_double_tap=on_track_double_click,
-                data=(track_id, name, author, path, cov_bytes),
-                content=item_content
-            )
-
-            # Собираем Drag & Drop (Матрешка)
-            drag_payload = {
-                "source": "playlist", 
-                "track_id": track_id, 
-                "position": position,
-                "track_data": (name, author, path, cov_bytes)
-            }
-
-            on_accept, on_will_accept, on_leave = make_drop_handlers(item_content)
-
-            drag_item = ft.DragTarget(
-                group="queue_drag", # ОБЩАЯ ГРУППА для плейлиста и очереди
-                data=position,        # Таргет знает свою позицию
-                on_accept=on_accept,
-                on_will_accept=on_will_accept,
-                on_leave=on_leave,
-                content=ft.Draggable(
-                    group="queue_drag",
-                    data=drag_payload, # Передаем полный словарь, чтобы очередь поняла, что ей прилетело
-                    content=ft.ContextMenu(
-                        content=item_wrapper,
-                        secondary_items=[
-                            ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
-                            ),
-                            *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                                ui_utils.add_track_to_playlist(p, 2),
-                                playlist_ui(page, playlist_list, play_btn, 2),)),]
-                                if playlist_idl != 2
-                                else []
-                            ),
-                            ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
-                            *([ft.PopupMenuItem(content=ft.Text("Удалить из избранного"), on_click=lambda e, id=track_id:(
-                                ui_utils.delete_playlist_track(id, 2),
-                                playlist_ui(page, playlist_list, play_btn, 2),)),]
-                                if playlist_idl == 2
-                                else [
-                                    ft.PopupMenuItem(content=ft.Text("Удалить из альбома")),
-                                ]
-                            ),
-                            ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
-                            ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
-                        ]
-                    ),
-                    content_when_dragging=ft.Container(
-                        content=ft.Text(f"Перемещение: {name}", size=track_cell[1]),
-                        padding=track_cell[4],
-                        bgcolor=ft.Colors.INVERSE_SURFACE,
-                        border_radius=track_border_radius,
-                        opacity=0.8
-                    )
-                )
-            )
-            playlist_list.controls.append(drag_item)
-        logger.debug(f"Найдено строк в базе: {len(rows)}")
-        logger.debug(f"Элементов в playlist_list.controls: {len(playlist_list.controls)}")
-        playlist_list.update()
+        t0 = time.perf_counter()
+        playlist_vlist.refresh(to_top=switched)
+        if need_scroll_top:
+            page.run_task(scroll_list_to_top, playlist_list)
+        logger.debug(f"Плейлист #{playlist_idl}: окно {playlist_vlist.start}-{playlist_vlist.end} "
+                     f"из {playlist_vlist.total} за {(time.perf_counter()-t0)*1000:.1f} мс")
 
     page.update()
 
@@ -1436,6 +1665,7 @@ def App(page: ft.Page):
                 ft.Container( # рабочая зона
                         # bgcolor=ft.Colors.RED_800,
                         content=playlist_list,
+                        padding=10, # был padding самого списка, у Column его нет
                         expand=True
                 ),
             ]
@@ -1762,13 +1992,19 @@ def App(page: ft.Page):
         track_year.value = message.get("Год", "")
         idx = message.get("idx", 0)
         
-        if message.get("cover", ""): track_cover.src = message.get("cover", "") 
+        if message.get("cover", ""): track_cover.src = message.get("cover", "")
         else: track_cover.src = "https://flet.dev/img/logo.svg"
+
+        # Обновляем DBOX явно. Раньше это происходило побочно: rebuild_queue_ui
+        # заканчивался page.update(). Теперь очередь обновляет только свой
+        # контейнер, и без этой строки метаданные меняются лишь тогда, когда
+        # page.update() случайно сделает кто-то ещё (например анимация скипа).
+        page.update()
+
         if idx == -2: #-2 для случая, когда трек загружается первым, чтобы не дергать анимацию
             rebuild_queue_ui()
         else:
             page.run_task(skip_track_with_animation, page, queue_list, remove_played_tracks_ui, idx)
-        # page.update()
 
     def on_playback_update(topic, message):
         curr_s = message.get("curr_sec", 0)

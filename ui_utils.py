@@ -190,7 +190,12 @@ def extract_cover_miniature(path): # Извлечение миниатюры 50x
 def get_folder_content(folder_path: str | Path):#анализ текущей папки (выбранной)
     path = Path(folder_path)
     if not path.exists() or not path.is_dir():
-        return [], []
+        # Возвращаем ровно то же, что и успешная ветка — один список.
+        # Раньше здесь был кортеж [], [], и вызывающий код падал на
+        # items[0]["path"] с TypeError (например, если start_path из
+        # конфига не существует — приложение не запускалось вообще)
+        logger.info(f"Папка {path} не существует или недоступна")
+        return []
     folders = []
     tracks = []
 
@@ -357,10 +362,16 @@ def slider_event(e: ft.ControlEvent, time_label):
     is_dragging = False
 
 def vol_slider_event(e, vol_label):
+    global start_vol_val
+    vol = int(e.control.value)
+    # Метку двигаем всегда: раньше при player is None (ничего ещё не играло)
+    # ползунок ехал, а число рядом не менялось
+    vol_label.value = str(vol)
+    vol_label.update()
+    # и запоминаем громкость, чтобы плеер создался уже с ней
+    start_vol_val = vol
     if player:
-        vol_label.value = int(e.control.value)
-        vol_label.update()
-        player.audio_set_volume(int(e.control.value))
+        player.audio_set_volume(vol)
 
 #Логика воспроизведение аудио ----
 
