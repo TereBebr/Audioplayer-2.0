@@ -1,0 +1,5 @@
+customtkinter==5.2.2
+flet==0.85.2
+mutagen==1.47.0
+Pillow==12.3.0
+python_vlc==3.0.21203

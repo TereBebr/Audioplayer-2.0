@@ -4,3 +4,6 @@ music/
 vlc_engine/
 gui.py
 *.db
+dist/
+build/
+*.spec

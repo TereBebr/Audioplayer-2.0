@@ -14,6 +14,7 @@ import io
 from PIL import Image, ImageDraw, ImageOps, ImageEnhance
 import sqlite3
 import random
+from contextlib import closing
 from mutagen.flac import FLACNoHeaderError
 import subprocess
 import logging
@@ -43,6 +44,29 @@ max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Макси�
 start_vol_val = config.getint('Main Settings', 'start_vol_val') # Начальное значение звука
 
 possible_covers = ["cover.jpg", "Cover.jpg", "cover.png", "folder.jpg"]
+
+#Работа с БД ----
+
+# Все соединения открываются через closing(), иначе sqlite3 не освобождает
+# файловые дескрипторы: `with sqlite3.connect(...)` управляет только транзакцией.
+
+def db_query_one(db_name, sql, params=()):
+    """Читает одну строку. Соединение закрывается всегда."""
+    try:
+        with closing(sqlite3.connect(db_name, timeout=10.0)) as con:
+            return con.execute(sql, params).fetchone()
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка чтения из {db_name}: {e}")
+        return None
+
+def db_query_all(db_name, sql, params=()):
+    """Читает все строки. Соединение закрывается всегда."""
+    try:
+        with closing(sqlite3.connect(db_name, timeout=10.0)) as con:
+            return con.execute(sql, params).fetchall()
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка чтения из {db_name}: {e}")
+        return []
 
 #Системные функции ----
 
@@ -201,7 +225,7 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             #в 0 эл. очереди
             try:
                 audio = mutagen.File(p)
-            except Exception as e:
+            except Exception as ex:
                 audio = utils.detect_and_load_audio(p)
                 # print(e)
             
@@ -213,13 +237,15 @@ def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на о
             tags = utils.get_audio_tags(audio, p)
             miniature = extract_cover_miniature(p)
 
-            con_queue = sqlite3.connect('queue.db')
-            cursor = con_queue.cursor()
-            cursor.execute('DELETE FROM queue WHERE id = ?', (0,))
-            cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)", 
-                           (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p), miniature))
-            con_queue.commit()
-            con_queue.close()
+            try:
+                with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
+                    with con_queue: # транзакция: commit при успехе, rollback при ошибке
+                        con_queue.execute('DELETE FROM queue WHERE id = ?', (0,))
+                        con_queue.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+                                          (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p), miniature))
+            except sqlite3.Error as ex:
+                logger.error(f"Ошибка БД при постановке трека в очередь: {ex}")
+                return
 
             load_track(e.page, p, play_btn_obj, -2)  # было 0
             # e.page.pubsub.send_all_on_topic("queue_advanced", 1)
@@ -303,22 +329,11 @@ def playpause_btn_ev(e, play_btn_obj):
                 play_btn_obj.src="assets/icons/pause_ico_inac.png"
             play_btn_obj.update()
         else:
-            try:
-                con_queue = sqlite3.connect('queue.db')
-                cursor = con_queue.cursor()
-                cursor.execute("SELECT path FROM queue WHERE id = 0")
-                r = cursor.fetchone()
-                con_queue.close()
-                
-                if r:
-                    load_track(e.page, r[0], play_btn_obj, -2)
-                    #player.play()
-                    #смена иконки
-            except Exception as ex:
-                logger.error(f"Нет id 0: {ex}")
-                pass
-            #player.play()
-            #смена иконки
+            r = db_query_one('queue.db', "SELECT path FROM queue WHERE id = 0")
+            if r:
+                load_track(e.page, r[0], play_btn_obj, -2)
+            else:
+                logger.info("Нет трека с id = 0, воспроизводить нечего")
 
 def slider_on_dragging(e: ft.ControlEvent, time_label): #чтоб не дергался при перемотке
     global is_dragging
@@ -390,11 +405,12 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
     tags["idx"] = idx
     page.pubsub.send_all_on_topic("tags_update", tags)
     # очистка истории < max_histlen
-    con_queue = sqlite3.connect('queue.db')
-    cursor = con_queue.cursor()
-    cursor.execute('DELETE FROM queue WHERE id < ?', (max_histlen,))
-    con_queue.commit()
-    con_queue.close()
+    try:
+        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
+            with con_queue:
+                con_queue.execute('DELETE FROM queue WHERE id < ?', (max_histlen,))
+    except sqlite3.Error as ex:
+        logger.error(f"Ошибка БД при очистке истории: {ex}")
 
 
 def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следующий, если False - предыдущий
@@ -495,18 +511,19 @@ def add_queue(p, insert_at): # <--- Добавили аргумент insert_at
         logger.info(f"Добавлено {len(files_to_add)} файлов.")
 
 def mix_queue(rebuild_queue):
-    con = sqlite3.connect('queue.db')
-    cursor = con.cursor()
-    cursor.execute("SELECT rowid, id FROM queue WHERE id > 0;")
-    rows = cursor.fetchall()
-    if rows:
-        rowids = [row[0] for row in rows]
-        ids = [row[1] for row in rows]
-        random.shuffle(ids)
-        # zip(ids, rowids) создаст пары вида (новый_id, старый_rowid)
-        cursor.executemany("UPDATE queue SET id = ? WHERE rowid = ?;", zip(ids, rowids))
-    con.commit()
-    con.close()
+    try:
+        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con:
+            with con:
+                rows = con.execute("SELECT rowid, id FROM queue WHERE id > 0;").fetchall()
+                if rows:
+                    rowids = [row[0] for row in rows]
+                    ids = [row[1] for row in rows]
+                    random.shuffle(ids)
+                    # zip(ids, rowids) создаст пары вида (новый_id, старый_rowid)
+                    con.executemany("UPDATE queue SET id = ? WHERE rowid = ?;", zip(ids, rowids))
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при перемешивании очереди: {e}")
+        return
     rebuild_queue()
 
 #----
@@ -551,62 +568,69 @@ def add_track_to_playlist(p, playlist_id, insert_at=None):
     if not tracks_data:
         return
     
-    with sqlite3.connect('app.db') as con_queue:
-        cursor = con_queue.cursor()
-        try:
-            # Если вставка по индексу, сдвигаем остаток
-            if insert_at is not None:
-                cursor.execute("""UPDATE playlist_tracks SET position = position + ? WHERE playlist_id = ? AND position >= ? """, 
-                               (len(tracks_data), playlist_id, insert_at))
-                current_position = insert_at
-            else:
-                cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
-                current_position = (cursor.fetchone()[0] or 0) + 1
+    try:
+        with closing(sqlite3.connect('app.db', timeout=10.0)) as con_app:
+            with con_app:
+                cursor = con_app.cursor()
 
-            # Запись треков
-            for track in tracks_data:
+                # 1. Резолвим id треков в общей таблице и отсеиваем те, что уже
+                #    есть в плейлисте: PRIMARY KEY (playlist_id, track_id) не даст
+                #    вставить дубль, а сдвиг позиций под него оставил бы дыру.
+                new_track_ids = []
+                for track in tracks_data:
+                    cursor.execute("SELECT id FROM tracks WHERE path = ?", (track["path"],))
+                    row = cursor.fetchone()
+                    if row is None:
+                        cursor.execute("""
+                            INSERT INTO tracks (name, author, path, cov_bytes)
+                            VALUES (?, ?, ?, ?)
+                        """, (track["name"], track["author"], track["path"], track["cov_bytes"]))
+                        track_id = cursor.lastrowid
+                    else:
+                        track_id = row[0]
 
-                # холостой обход
-                cursor.execute("SELECT id FROM tracks WHERE path = ?", (track["path"],))
-                test_id = cursor.fetchone()
-                if test_id is None:
-                    # Добавляем в общую таблицу
+                    cursor.execute("SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
+                                   (playlist_id, track_id))
+                    if cursor.fetchone() is None and track_id not in new_track_ids:
+                        new_track_ids.append(track_id)
+
+                if not new_track_ids:
+                    logger.info(f"Все треки уже есть в плейлисте #{playlist_id}, добавлять нечего.")
+                    return
+
+                # 2. Освобождаем место ровно под то количество, что реально вставим
+                if insert_at is not None:
+                    cursor.execute("""UPDATE playlist_tracks SET position = position + ? WHERE playlist_id = ? AND position >= ? """,
+                                   (len(new_track_ids), playlist_id, insert_at))
+                    current_position = insert_at
+                else:
+                    cursor.execute("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
+                    current_position = (cursor.fetchone()[0] or 0) + 1
+
+                # 3. Запись треков
+                for track_id in new_track_ids:
                     cursor.execute("""
-                        INSERT OR IGNORE INTO tracks (name, author, path, cov_bytes) 
-                        VALUES (?, ?, ?, ?)
-                    """, (track["name"], track["author"], track["path"], track["cov_bytes"]))
-                
-                # Получаем ID
-                cursor.execute("SELECT id FROM tracks WHERE path = ?", (track["path"],))
-                track_id = cursor.fetchone()[0]
+                        INSERT INTO playlist_tracks (playlist_id, track_id, position)
+                        VALUES (?, ?, ?)
+                    """, (playlist_id, track_id, current_position))
+                    current_position += 1
 
-                # Добавляем в плейлист
-                cursor.execute("""
-                    INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
-                    VALUES (?, ?, ?)
-                """, (playlist_id, track_id, current_position))
-                
-                current_position += 1
+                logger.info(f"Успешно добавлено {len(new_track_ids)} файлов в плейлист #{playlist_id}.")
 
-            logger.info(f"Успешно добавлено {len(tracks_data)} файлов в плейлист #{playlist_id}.")
-
-        except sqlite3.Error as e:
-            logger.error(f"Ошибка БД при добавлении в плейлист: {e}")
-            con_queue.rollback()
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при добавлении в плейлист: {e}")
 
 def add_playlist_to_queue(playlist_id, insert_at=None):
     # 1. Получаем список треков из основной БД
-    with sqlite3.connect('app.db') as con_app:
-        cursor = con_app.cursor()
-        cursor.execute(
-            """SELECT t.name, t.author, t.path, t.cov_bytes
-               FROM tracks t
-               JOIN playlist_tracks pt ON t.id = pt.track_id
-               WHERE pt.playlist_id = ?
-               ORDER BY pt.position ASC""",
-            (playlist_id,)
-        )
-        tracks = cursor.fetchall()
+    tracks = db_query_all(
+        'app.db',
+        """SELECT t.name, t.author, t.path, t.cov_bytes
+           FROM tracks t
+           JOIN playlist_tracks pt ON t.id = pt.track_id
+           WHERE pt.playlist_id = ?
+           ORDER BY pt.position ASC""",
+        (playlist_id,)
+    )
 
     if not tracks:
         return
@@ -634,58 +658,55 @@ def add_playlist_to_queue(playlist_id, insert_at=None):
         return
 
     # 3. Вставляем элементы с учетом нумерации по полю id
-    with sqlite3.connect('queue.db') as con_queue:
-        cursor = con_queue.cursor()
-        num_new_tracks = len(queue_records)
+    try:
+        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
+            with con_queue:
+                cursor = con_queue.cursor()
+                num_new_tracks = len(queue_records)
 
-        if insert_at is None:
-            # Обычный добавление в конец: берем MAX(id), если очередь пуста — начинаем с 0
-            cursor.execute("SELECT MAX(id) FROM queue")
-            max_id = cursor.fetchone()[0]
-            start_id = 0 if max_id is None else max_id + 1
-        else:
-            start_id = insert_at
-            # Сдвигаем элементы с id >= insert_at на num_new_tracks вперед.
-            # ORDER BY id DESC предотвращает потенциальные коллизии в процессе обновления
-            cursor.execute("""UPDATE queue SET id = id + ? WHERE id >= ?""",(num_new_tracks, start_id))
+                if insert_at is None:
+                    # Обычный добавление в конец: берем MAX(id), если очередь пуста — начинаем с 0
+                    cursor.execute("SELECT MAX(id) FROM queue")
+                    max_id = cursor.fetchone()[0]
+                    start_id = 0 if max_id is None else max_id + 1
+                else:
+                    start_id = insert_at
+                    # Сдвигаем элементы с id >= insert_at на num_new_tracks вперед.
+                    cursor.execute("""UPDATE queue SET id = id + ? WHERE id >= ?""",(num_new_tracks, start_id))
 
-        # Подготавливаем кортежи для вставки: (id, name, author, path, cov_bytes)
-        records_to_insert = [
-            (start_id + idx, rec[0], rec[1], rec[2], rec[3])
-            for idx, rec in enumerate(queue_records)
-        ]
+                # Подготавливаем кортежи для вставки: (id, name, author, path, cov_bytes)
+                records_to_insert = [
+                    (start_id + idx, rec[0], rec[1], rec[2], rec[3])
+                    for idx, rec in enumerate(queue_records)
+                ]
 
-        cursor.executemany(
-            "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-            records_to_insert
-        )
+                cursor.executemany(
+                    "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+                    records_to_insert
+                )
+    except sqlite3.Error as e:
+        logger.error(f"Ошибка БД при добавлении плейлиста в очередь: {e}")
+        return
 
     logger.info(f"Успешно добавлено {len(records_to_insert)} файлов в очередь.")
 
 def delete_playlist(playlist_id : int):
     try:
-        with sqlite3.connect('app.db') as con:
+        with closing(sqlite3.connect('app.db', timeout=10.0)) as con:
+            # PRAGMA должен быть выставлен до начала транзакции
             con.execute("PRAGMA foreign_keys = ON")
-            con.execute("DELETE FROM playlists WHERE id = ?",(playlist_id,))
+            with con:
+                # playlist_tracks чистится каскадом по FK, но удаляем явно —
+                # на случай, если база создавалась без включённых foreign_keys
+                con.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?",(playlist_id,))
+                con.execute("DELETE FROM playlists WHERE id = ?",(playlist_id,))
+                # треки, не оставшиеся ни в одном плейлисте, больше не нужны
+                con.execute("""
+                    DELETE FROM tracks
+                    WHERE id NOT IN (SELECT track_id FROM playlist_tracks)
+                """)
     except sqlite3.Error as e:
         logger.error(f"Ошибка при удалении плейлиста: {e}")
-
-
-    cursor = con.cursor()
-    try:
-        cursor.execute("DELETE FROM playlists WHERE id = ?",(playlist_id,))
-    except Exception as e:
-        con.rollback()
-        logger.error(f"Ошибка при удалении плейлиста: {e}")
-
-    try:
-        cursor.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?",(playlist_id,))
-    except Exception as e:
-        con.rollback()
-        logger.error(f"Ошибка при удалении треков из плейлиста: {e}")
-    
-    finally:
-        con.close()
 
 def delete_playlist_track(track_id: int, playlist_id: int):
     con = sqlite3.connect('app.db')
@@ -750,29 +771,36 @@ def dublicate_queue_track(track_uid: int):
         con.close()
 
 def delete_track_from_queue(e, track_uid:int, play_btn_obj):
-    con = sqlite3.connect("queue.db")
-    cursor = con.cursor()
+    """Удаляет трек из очереди.
 
-    # logger.info(track_uid)
+    Возвращает True, если вместо удаления был выполнен переход на следующий трек
+    (удаляли тот, что играет сейчас). В этом случае UI очереди уже обновит
+    подписчик tags_update, и вызывать ребилд снаружи не нужно.
+    """
+    advanced = False
     try:
-        cursor.execute("SELECT * FROM queue WHERE uid = ?",(track_uid,))
-        r = cursor.fetchone()
-        # print(r)
-        if r:
+        with closing(sqlite3.connect("queue.db", timeout=10.0)) as con:
+            cursor = con.cursor()
+            cursor.execute("SELECT * FROM queue WHERE uid = ?",(track_uid,))
+            r = cursor.fetchone()
+            if r is None:
+                logger.error(f"Трек с uid={track_uid} не найден в очереди.")
+                return False
             if r[0] == 0:
-                con.close()
-                play_next_or_pred(e, True, play_btn_obj)
-                return
-            cursor.execute('DELETE FROM queue WHERE uid = ?', (track_uid,))
-            cursor.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (r[0],))
-            con.commit()
-        else:
-            logger.error(f"Трек с uid={track_uid} не найден в очереди.")
-    except Exception as er:
-        con.rollback()
+                advanced = True
+            else:
+                with con:
+                    con.execute('DELETE FROM queue WHERE uid = ?', (track_uid,))
+                    con.execute("UPDATE queue SET id = id - 1 WHERE id > ?", (r[0],))
+    except sqlite3.Error as er:
         logger.error(f"Ошибка вызова операции: {er}")
-    finally:
-        con.close()
+        return False
+
+    # Переход делаем уже после закрытия соединения: load_track внутри
+    # play_next_or_pred сам лезет в queue.db
+    if advanced:
+        play_next_or_pred(e, True, play_btn_obj)
+    return advanced
 
 
 #----
@@ -811,25 +839,28 @@ def bg_ui_process(page: ft.Page, play_btn):
                     r = None
 
                     try:
-                        # 1. Открываем соединение с таймаутом ожидания блокировки
-                        with sqlite3.connect('queue.db', timeout=10.0) as con_queue:
+                        # 1. Открываем соединение с таймаутом ожидания блокировки.
+                        # closing() обязателен: без него соединение остаётся открытым
+                        # на каждом автопереходе и WAL растёт всю сессию.
+                        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
                             con_queue.execute("PRAGMA journal_mode=WAL;")
-                            cursor = con_queue.cursor()
+                            with con_queue: # транзакция
+                                cursor = con_queue.cursor()
 
-                            # 2. Получаем текущий трек
-                            cursor.execute("SELECT path FROM queue WHERE id = 1")
-                            r = cursor.fetchone()
+                                # 2. Получаем текущий трек
+                                cursor.execute("SELECT path FROM queue WHERE id = 1")
+                                r = cursor.fetchone()
 
-                            if r:
-                                # Сдвигаем очередь
-                                cursor.execute("UPDATE queue SET id = id - 1")
-                            else:
-                                # Если id = 1 не найден, проверяем, есть ли другие треки
-                                cursor.execute("SELECT MAX(id) FROM queue")
-                                max_id_row = cursor.fetchone()
-                                
-                                if max_id_row and max_id_row[0] and max_id_row[0] > 0:
-                                    cursor.execute("UPDATE queue SET id = id - 1 WHERE id > 1")
+                                if r:
+                                    # Сдвигаем очередь
+                                    cursor.execute("UPDATE queue SET id = id - 1")
+                                else:
+                                    # Если id = 1 не найден, проверяем, есть ли другие треки
+                                    cursor.execute("SELECT MAX(id) FROM queue")
+                                    max_id_row = cursor.fetchone()
+
+                                    if max_id_row and max_id_row[0] and max_id_row[0] > 0:
+                                        cursor.execute("UPDATE queue SET id = id - 1 WHERE id > 1")
 
                     except Exception as ex:
                         logger.error(f"Ошибка при авто-переходе: {ex}")

@@ -6,6 +6,7 @@ from pathlib import Path
 from ui_utils import bg_ui_process
 import os
 import sqlite3
+from contextlib import closing
 import time
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 
@@ -165,6 +166,24 @@ def App(page: ft.Page):
     async def _on_add_to_queue_click(p, i, e=None):
         await on_files_dropped(p, insert_at=i)
 
+    def open_dialog(page, dlg):
+        """Показывает диалог. Парная к close_dialog: см. комментарий там."""
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
+
+    def close_dialog(page, dlg):
+        """Закрывает диалог и убирает его из overlay.
+
+        Без удаления каждый вызов диалога оставлял в page.overlay ещё один
+        мёртвый AlertDialog, и список рос всю сессию.
+        """
+        dlg.open = False
+        page.update()
+        if dlg in page.overlay:
+            page.overlay.remove(dlg)
+            page.update()
+
     def show_albums_dialog(e, track_path):
         selected_albums = set()
         page = e.page
@@ -176,42 +195,24 @@ def App(page: ft.Page):
             else:
                 selected_albums.discard(album_id)
 
-        def close_dialog(e):
-            dlg.open = False
-            page.update()
-
         def save_selection(e):
-            for alb in selected_albums:
-                ui_utils.add_track_to_playlist(track_path, alb)
-            logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
-            close_dialog(e)
-            playlist_ui(page, playlist_list, play_btn, alb)
+            if selected_albums:
+                for alb in selected_albums:
+                    ui_utils.add_track_to_playlist(track_path, alb)
+                logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
+                playlist_ui(page, playlist_list, play_btn, alb)
+            close_dialog(page, dlg)
 
-        def get_playlists(e):
-            con_app = sqlite3.connect('app.db')
-            cursor = con_app.cursor()
+        def get_playlists():
             albums = []
-
-            try:
-                cursor.execute("SELECT id, name, cover_path FROM playlists")
-                results = cursor.fetchall()
-            
-                for playlist_id, name, cover_path in results:
-                    if playlist_id != 1:
-                        a = {"id": playlist_id, "name": name, "img": cover_path}
-                        albums.append(a)
-                    
-            except Exception as er:
-                logger.error(f"Ошибка извлечения списка плейлистов {er}")
-                close_dialog(e)
-            finally:
-                con_app.close()
-
+            for pl_id, name, cover_path in ui_utils.db_query_all('app.db', "SELECT id, name, cover_path FROM playlists"):
+                if pl_id != 1:
+                    albums.append({"id": pl_id, "name": name, "img": cover_path})
             return albums
 
         # Сборка
         album_controls = []
-        albums = get_playlists(e)
+        albums = get_playlists()
         for album in albums:
             fallback_cover = ft.Container(
                 content=ft.Icon(ft.Icons.ALBUM, color=ft.Colors.WHITE, size=24),
@@ -250,48 +251,60 @@ def App(page: ft.Page):
                 )
             ),
             actions=[
-                ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
                 ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        page.overlay.append(dlg)
-        dlg.open = True
-        page.update()
+        open_dialog(page, dlg)
 
     def create_albums_dialog(page: ft.Page):
-            def close_dialog(e):
-                dlg.open = False
-                page.update()
-
             def save_selection(e):
-                playlist_name = name_input.value.strip() if name_input.value else ""
+                new_name = name_input.value.strip() if name_input.value else ""
                 cover_path = cover_input.value.strip() if cover_input.value else None
-                if not playlist_name:
+                if not new_name:
                     name_input.error_text = "Введите название"
                     page.update()
                     return
-                create_playlist_sql(playlist_name, cover_path)
+                new_id = create_playlist_sql(new_name, cover_path)
+                if new_id is None:
+                    # name в playlists объявлен UNIQUE: раньше INSERT OR IGNORE
+                    # молча ничего не делал, а в лог писалось "успешно создан"
+                    name_input.error_text = "Плейлист с таким именем уже есть"
+                    page.update()
+                    return
                 update_albums_ui()
-                logger.info(f"Альбом {playlist_name} успешно создан")
-                close_dialog(e)
+                logger.info(f"Альбом {new_name} успешно создан (#{new_id})")
+                open_new_playlist(new_id)
+                close_dialog(page, dlg)
 
-            def create_playlist_sql(playlist_name: str, cover_path=None):
-                if cover_path is None:
+            def open_new_playlist(new_id):
+                global playlist_name, playlist_desk, playlist_cover_path, playlist_id
+                r = ui_utils.db_query_one('app.db', "SELECT id, name, desk, cover_path FROM playlists WHERE id = ?", (new_id,))
+                if r:
+                    playlist_id = r[0]
+                    playlist_name = r[1]
+                    playlist_desk = r[2]
+                    playlist_cover_path = r[3]
+                playlist_ui(page, playlist_list, play_btn, playlist_id)
+
+            def create_playlist_sql(new_name: str, cover_path=None):
+                """Создаёт плейлист. Возвращает его id или None, если имя занято."""
+                if not cover_path:
                     cover_path = "storage/playlists_covers/default.png"
-                con_app = sqlite3.connect('app.db')
-                cursor = con_app.cursor()
                 try:
-                    cursor.execute("INSERT OR IGNORE INTO playlists (name, cover_path) VALUES (?, ?)",
-                                (playlist_name, cover_path))
-                    con_app.commit()
-                except Exception as er:
-                        con_app.rollback()
-                        logger.error(f"Ошибка создания плейлиста: {er}")
-                finally:
-                    con_app.close()
-                pass
+                    with closing(sqlite3.connect('app.db', timeout=10.0)) as con_app:
+                        with con_app:
+                            cur = con_app.execute("INSERT INTO playlists (name, cover_path) VALUES (?, ?)",
+                                                  (new_name, cover_path))
+                            return cur.lastrowid
+                except sqlite3.IntegrityError:
+                    logger.error(f"Плейлист с именем '{new_name}' уже существует")
+                    return None
+                except sqlite3.Error as er:
+                    logger.error(f"Ошибка создания плейлиста: {er}")
+                    return None
 
             name_input = ft.TextField(label="Название плейлиста", expand=True)
             cover_input = ft.TextField(label="Путь к картинке (опционально)", expand=True)
@@ -311,51 +324,52 @@ def App(page: ft.Page):
                     ], spacing=10),
                 ),
                 actions=[
-                    ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                    ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
                     ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
                 ],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
 
-            page.overlay.append(dlg)
-            dlg.open = True
-            page.update()
+            open_dialog(page, dlg)
 
     def change_albums_dialog(page: ft.Page, pl_id, pl_name, pl_cover_path):
-        def close_dialog(e):
-            dlg.open = False
-            page.update()
-
         def save_selection(e, p_id):
-            playlist_name = name_input.value.strip() if name_input.value else pl_name
-            cover_path = cover_input.value.strip() if cover_input.value else None
-            if not playlist_name:
-                name_input.error_text = pl_name
+            new_name = name_input.value.strip() if name_input.value else ""
+            # Пустое поле обложки означает "оставить как было", а не "сбросить
+            # на default.png": раньше переименование затирало обложку плейлиста
+            new_cover = cover_input.value.strip() if cover_input.value else ""
+            if not new_name:
+                name_input.error_text = "Введите название"
                 page.update()
                 return
-            change_playlist_sql(p_id, playlist_name, cover_path)
+            if not change_playlist_sql(p_id, new_name, new_cover or pl_cover_path):
+                name_input.error_text = "Плейлист с таким именем уже есть"
+                page.update()
+                return
             update_albums_ui()
-            logger.info(f"Альбом {playlist_name} успешно изменен")
-            close_dialog(e)
+            logger.info(f"Альбом {new_name} успешно изменен")
+            close_dialog(page, dlg)
 
-        def change_playlist_sql(id, playlist_name: str, cover_path=None):
-            if cover_path is None:
+        def change_playlist_sql(id, new_name: str, cover_path=None):
+            """Обновляет плейлист. False — имя занято или ошибка БД."""
+            if not cover_path:
                 cover_path = "storage/playlists_covers/default.png"
-            con_app = sqlite3.connect('app.db')
-            cursor = con_app.cursor()
             try:
-                cursor.execute("UPDATE playlists SET name = ?, cover_path = ? WHERE id = ?",
-                            (playlist_name, cover_path, id))
-                con_app.commit()
-            except Exception as er:
-                    con_app.rollback()
-                    logger.error(f"Ошибка изменения плейлиста: {er}")
-            finally:
-                con_app.close()
-            pass
+                with closing(sqlite3.connect('app.db', timeout=10.0)) as con_app:
+                    with con_app:
+                        con_app.execute("UPDATE playlists SET name = ?, cover_path = ? WHERE id = ?",
+                                        (new_name, cover_path, id))
+                return True
+            except sqlite3.IntegrityError:
+                logger.error(f"Плейлист с именем '{new_name}' уже существует")
+                return False
+            except sqlite3.Error as er:
+                logger.error(f"Ошибка изменения плейлиста: {er}")
+                return False
 
-        name_input = ft.TextField(label=pl_name, expand=True)
-        cover_input = ft.TextField(label=pl_cover_path or "Путь к картинке (опционально)", expand=True)
+        # value, а не label: label это только подсказка, поле оставалось пустым
+        name_input = ft.TextField(label="Название плейлиста", value=pl_name, expand=True)
+        cover_input = ft.TextField(label="Путь к картинке (опционально)", value=pl_cover_path or "", expand=True)
         
         # Создаем диалог
         dlg = ft.AlertDialog(
@@ -372,15 +386,13 @@ def App(page: ft.Page):
                 ], spacing=10),
             ),
             actions=[
-                ft.TextButton("Отмена", on_click=lambda e: close_dialog(e)),
+                ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
                 ft.ElevatedButton("Сохранить", on_click=lambda e: save_selection(e, p_id=pl_id), bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        page.overlay.append(dlg)
-        dlg.open = True
-        page.update()
+        open_dialog(page, dlg)
 
     # Динамический проводник
     def rebuild_explorer(items, current_dir, is_search=False):
@@ -515,6 +527,21 @@ def App(page: ft.Page):
         # alignment=ft.MainAxisAlignment.START
     )
 
+    def queue_cell_title(container):
+        """Достаёт Text с названием трека из ячейки очереди.
+
+        Разметка ячейки: Container -> ContextMenu -> Row -> [обложка, Column]
+        -> Column.controls[0] это название. Вынесено в одно место, чтобы
+        добавление очередной обёртки ломалось заметно, а не молча.
+        """
+        try:
+            row = container.content.content   # Container -> ContextMenu -> Row
+            column_control = row.controls[-1]
+            return column_control.controls[0]
+        except (AttributeError, IndexError) as ex:
+            logger.debug(f"Не удалось найти название трека в ячейке очереди: {ex}")
+            return None
+
     def remove_played_tracks_ui(count):
         """Убирает первые `count` треков из UI без полного ребилда."""
         for _ in range(min(count, len(queue_list.controls))):
@@ -525,16 +552,24 @@ def App(page: ft.Page):
             container = new_first.content.content  # DragTarget -> Draggable -> Container
             container.border = ft.Border.all(2, ft.Colors.GREEN)
             container.bgcolor = ft.Colors.SURFACE_CONTAINER_HIGH
-            try:
-                row_controls = container.content.controls
-                column_control = row_controls[-1]
-                title_text = column_control.controls[0]
+            title_text = queue_cell_title(container)
+            if title_text is not None:
                 title_text.color = ft.Colors.GREEN
-            except Exception:
-                pass
 
         queue_list.update()
     
+    def delete_from_queue(e, uid):
+        """Удаление трека из очереди с корректным обновлением UI.
+
+        Если удаляли играющий трек, ui_utils переключается на следующий и
+        присылает tags_update — очередь перерисует уже подписчик. Свой
+        rebuild_queue_ui() тут привёл бы к гонке с анимацией скипа:
+        она отработала бы по уже перестроенному списку и убрала лишний элемент.
+        """
+        advanced = ui_utils.delete_track_from_queue(e, uid, play_btn)
+        if not advanced:
+            rebuild_queue_ui()
+
     def rebuild_queue_ui(idx=None):
         t0 = time.perf_counter()
         queue_list.controls.clear()
@@ -571,12 +606,9 @@ def App(page: ft.Page):
             ui_utils.load_track(page, path, play_btn, clicked_pos)
             # remove_played_tracks_ui(clicked_pos)
 
-        con = sqlite3.connect('queue.db')
-        cursor = con.cursor()
         # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
-        cursor.execute("SELECT id, uid, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
-        rows = cursor.fetchall()
-        con.close()
+        rows = ui_utils.db_query_all('queue.db',
+            "SELECT id, uid, name, author, path, cov_bytes FROM queue WHERE id >= 0 ORDER BY id ASC")
 
         anim_config = ft.Animation(350, ft.AnimationCurve.EASE_OUT)
         for row in rows:
@@ -614,13 +646,9 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
-                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: (
-                            ui_utils.delete_track_from_queue(e, uid, play_btn),
-                            rebuild_queue_ui(),
-                        ),
-                    ),
-                    ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
-                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
+                        ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
+                        ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
                     ]
                 ),
                 padding=queue_cell[4],
@@ -652,11 +680,7 @@ def App(page: ft.Page):
                 # ВЕТКА 1: Бросили файл/папку (СТРОКА)
                 # ==========================================
                 if isinstance(src_data, str):
-                    con_q = sqlite3.connect('queue.db')
-                    cur = con_q.cursor()
-                    cur.execute("SELECT id FROM queue WHERE uid = ?", (target_uid,))
-                    row = cur.fetchone()
-                    con_q.close()
+                    row = ui_utils.db_query_one('queue.db', "SELECT id FROM queue WHERE uid = ?", (target_uid,))
                     if row is None:
                         return
                     target_pos = row[0]
@@ -664,11 +688,7 @@ def App(page: ft.Page):
                     await on_files_dropped(src_data, insert_at=target_pos)
 
                     if target_pos == 0:
-                        con_q = sqlite3.connect('queue.db')
-                        cur = con_q.cursor()
-                        cur.execute("SELECT path FROM queue WHERE id = 0")
-                        new_track = cur.fetchone()
-                        con_q.close()
+                        new_track = ui_utils.db_query_one('queue.db', "SELECT path FROM queue WHERE id = 0")
                         if new_track:
                             ui_utils.load_track(page, new_track[0], play_btn, -2)
                     return
@@ -714,17 +734,13 @@ def App(page: ft.Page):
                 if isinstance(src_data, dict) and src_data.get("source") == "playlist_full":
                     src_playlist_id = src_data["playlist_id"]
 
-                    con_app = sqlite3.connect('app.db')
-                    cur_app = con_app.cursor()
-                    cur_app.execute("""
+                    tracks_to_add = ui_utils.db_query_all('app.db', """
                         SELECT t.name, t.author, t.path, t.cov_bytes
                         FROM playlist_tracks pt
                         JOIN tracks t ON pt.track_id = t.id
                         WHERE pt.playlist_id = ?
                         ORDER BY pt.position
                     """, (src_playlist_id,))
-                    tracks_to_add = cur_app.fetchall()
-                    con_app.close()
 
                     if not tracks_to_add:
                         return  # пустой плейлист — вставлять нечего
@@ -874,17 +890,12 @@ def App(page: ft.Page):
             first_container.offset = ft.Offset(-1, 0)
             first_container.border = ft.Border.all(0, ft.Colors.TRANSPARENT)
 
-            if len(queue_list.controls) > 1:
+            if len(queue_list.controls) > 1 and idx == 1:
                 next_item = queue_list.controls[1]
                 next_container = next_item.content.content
-                try:
-                    row_controls = next_container.content.controls
-                    column_control = row_controls[-1]
-                    title_text = column_control.controls[0]
-                    if idx == 1:
-                        title_text.color = ft.Colors.GREEN
-                except Exception:
-                    pass
+                title_text = queue_cell_title(next_container)
+                if title_text is not None:
+                    title_text.color = ft.Colors.GREEN
 
             page.update()
             await asyncio.sleep(0.45)
@@ -1010,27 +1021,15 @@ def App(page: ft.Page):
     )
 
     def rebuild_playlists_list():
-        con_app = sqlite3.connect('app.db')
-        cursor = con_app.cursor()
-
-        try:
-            cursor.execute("SELECT id, name, cover_path FROM playlists")
-            results = cursor.fetchall()
-
-            ids = []
-            names = []
-            covers = []
-            for row in results:
-                ids.append(row[0])
-                names.append(row[1])
-                covers.append(row[2])
-            return ids, names, covers
-
-        except sqlite3.OperationalError as e:
-            logger.error(f"Ошибка БД: app #01")
-            return [], [], []
-        finally:
-            con_app.close()
+        results = ui_utils.db_query_all('app.db', "SELECT id, name, cover_path FROM playlists")
+        ids = []
+        names = []
+        covers = []
+        for row in results:
+            ids.append(row[0])
+            names.append(row[1])
+            covers.append(row[2])
+        return ids, names, covers
     playlist_ids, playlist_names, playlist_images = rebuild_playlists_list()
 
     playlist_list = ft.ListView(
@@ -1045,7 +1044,7 @@ def App(page: ft.Page):
 
     playlist_data = ft.Container(
         height=100,
-        bgcolor=ft.Colors.RED_800,
+        # bgcolor=ft.Colors.RED_800,
         content=ft.Row(
             controls=[
                 ft.Container(
@@ -1058,11 +1057,11 @@ def App(page: ft.Page):
                     spacing=3,
                     controls=[
                         ft.Container(
-                            bgcolor=ft.Colors.RED_700, 
+                            # bgcolor=ft.Colors.RED_700, 
                             content=playlist_title_text
                         ),
                         ft.Container(
-                            bgcolor=ft.Colors.RED_600, 
+                            # bgcolor=ft.Colors.RED_600, 
                             content=playlist_desc_text
                         ),
                     ]
@@ -1126,90 +1125,83 @@ def App(page: ft.Page):
         global playlist_id, playlist_name, playlist_desk, playlist_cover_path
         if playlist_idl == 1:
             create_albums_dialog(page)
-            con = sqlite3.connect("app.db")
-            cursor = con.cursor()
-            cursor.execute("SELECT id, name, desk, cover_path FROM playlists WHERE id = (SELECT MAX(id) FROM playlists)")
-            r = cursor.fetchone()
-            con.close()
-            playlist_name = r[1]
-            playlist_desk = r[2]
-            playlist_cover_path = r[3]
-            playlist_ui(page, playlist_list, play_btn_obj, r[0])
             return
         if playlist_idl != playlist_id:
-            con = sqlite3.connect("app.db")
-            cursor = con.cursor()
-            cursor.execute("SELECT name, desk, cover_path FROM playlists WHERE id = ?", (playlist_idl,))
-            r = cursor.fetchone()
-            con.close()
-            playlist_id = playlist_idl
-            playlist_name = r[0]
-            playlist_desk = r[1]
-            playlist_cover_path = r[2]
+            r = ui_utils.db_query_one('app.db', "SELECT name, desk, cover_path FROM playlists WHERE id = ?", (playlist_idl,))
+            if r:
+                playlist_id = playlist_idl
+                playlist_name = r[0]
+                playlist_desk = r[1]
+                playlist_cover_path = r[2]
         update_playlist_data(playlist_name, playlist_desk, playlist_cover_path)
         playlist_list.controls.clear()
 
         # --- 1. ЗАГРУЗКА ДАННЫХ ПЛЕЙЛИСТА ---
-        con = sqlite3.connect('app.db')
-        cursor = con.cursor()
-        cursor.execute("""
+        rows = ui_utils.db_query_all('app.db', """
             SELECT t.id, t.name, t.author, t.path, t.cov_bytes, pt.position
             FROM playlist_tracks pt 
             JOIN tracks t ON pt.track_id = t.id
             WHERE pt.playlist_id = ? 
             ORDER BY pt.position; 
         """, (playlist_idl,))
-        rows = cursor.fetchall()
-        con.close()
 
         def on_track_double_click(e):
             t_id, t_name, t_author, t_path, t_cov = e.control.data 
             
-            con_q = sqlite3.connect('queue.db')
-            cursor = con_q.cursor()
-
             try:
-                cursor.execute('DELETE FROM queue WHERE id = ?', (0,))
-                cursor.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)", 
-                               (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
-            except Exception as ex:
+                with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_q:
+                    # commit был в finally и срабатывал даже после ошибки —
+                    # теперь транзакция откатывается, если вставка не прошла
+                    with con_q:
+                        con_q.execute('DELETE FROM queue WHERE id = ?', (0,))
+                        con_q.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
+                                      (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
+            except sqlite3.Error as ex:
                 logger.error(f"Ошибка БД очереди: {ex}")
-            finally:
-                con_q.commit()
-                con_q.close()
-                
+                return
+
             # ui_utils.load_track(e.page,t_path, play_btn_obj, 0)
             ui_utils.load_track(e.page,t_path, play_btn_obj, -2)
             logger.debug(f"файл: {t_path}")
             # rebuild_queue_ui()
 
-        def on_accept(e):
-            src_control = page.get_control(e.src_id)
-            if src_control is None: return
-            
-            src_data = src_control.data      # Что тащим (словарь с данными)
-            target_pos = e.control.data      # Куда бросаем (позиция)
+        def make_drop_handlers(container):
+            """Обработчики drop'а, привязанные к Container конкретной строки.
 
-            # Если тянем трек из этого же плейлиста
-            if isinstance(src_data, dict) and src_data.get("source") == "playlist":
-                src_pos = src_data["position"]
-                if src_pos != target_pos:
-                    # Вызываем вспомогательную функцию сдвига (написана ниже)
-                    shift_playlist_track_db(playlist_idl, src_pos, target_pos)
-                    # Перерисовываем плейлист
-                    playlist_ui(page, playlist_list, play_btn, playlist_idl)
-            
-            # Сброс визуального выделения
-            e.control.content.content.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
-            e.control.update()
+            Раньше рамка искалась как e.control.content.content, но там лежит
+            ContextMenu, а не Container: присваивание проходило молча и
+            подсветки не было вообще.
+            """
+            def _on_accept(e):
+                # Снимаем подсветку до возможного ребилда: после playlist_ui()
+                # этот контрол уже не в дереве и update() по нему упадёт
+                container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+                container.update()
 
-        def on_will_accept(e):
-            e.control.content.content.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
-            e.control.update()
+                src_control = page.get_control(e.src_id)
+                if src_control is None: return
 
-        def on_leave(e):
-            e.control.content.content.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
-            e.control.update()
+                src_data = src_control.data      # Что тащим (словарь с данными)
+                target_pos = e.control.data      # Куда бросаем (позиция)
+
+                # Если тянем трек из этого же плейлиста
+                if isinstance(src_data, dict) and src_data.get("source") == "playlist":
+                    src_pos = src_data["position"]
+                    if src_pos != target_pos:
+                        # Вызываем вспомогательную функцию сдвига (написана ниже)
+                        shift_playlist_track_db(playlist_idl, src_pos, target_pos)
+                        # Перерисовываем плейлист
+                        playlist_ui(page, playlist_list, play_btn, playlist_idl)
+
+            def _on_will_accept(e):
+                container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+                container.update()
+
+            def _on_leave(e):
+                container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
+                container.update()
+
+            return _on_accept, _on_will_accept, _on_leave
 
         # --- 4. ОТРИСОВКА ИНТЕРФЕЙСА ---
         for row in rows:
@@ -1247,6 +1239,8 @@ def App(page: ft.Page):
                 "position": position,
                 "track_data": (name, author, path, cov_bytes)
             }
+
+            on_accept, on_will_accept, on_leave = make_drop_handlers(item_content)
 
             drag_item = ft.DragTarget(
                 group="queue_drag", # ОБЩАЯ ГРУППА для плейлиста и очереди
@@ -1309,24 +1303,24 @@ def App(page: ft.Page):
         
         # Заполняем строку актуальными данными
         for p_id, name, img in zip(p_ids, p_names, p_images):
-            card_container = ft.GestureDetector(
-                on_tap=lambda e, pid=p_id: playlist_ui(page, playlist_list, play_btn, pid),
-                content=ft.Container(
-                    content=ft.Image(
-                        src=img,
-                        width=50,
-                        height=50,
-                        fit="cover"
-                    ),
-                    tooltip=name, 
-                    border_radius=12,
-                    border=ft.Border.all(2, ft.Colors.TRANSPARENT),
-                )
+            # Именно на этом Container лежит рамка — её и подсвечиваем при drag.
+            # Раньше подсветка вешалась на GestureDetector-обёртку: присваивание
+            # проходило без ошибки, но ничего не рисовало.
+            card_border = ft.Container(
+                content=ft.Image(
+                    src=img,
+                    width=50,
+                    height=50,
+                    fit="cover"
+                ),
+                tooltip=name,
+                border_radius=12,
+                border=ft.Border.all(2, ft.Colors.TRANSPARENT),
             )
 
             card = ft.GestureDetector(
                 on_tap=lambda e, pid=p_id: playlist_ui(page, playlist_list, play_btn, pid),
-                content=card_container
+                content=card_border
                 )
 
             if p_id == 2:
@@ -1364,15 +1358,15 @@ def App(page: ft.Page):
 
         # --- Приём drop'а ---
             if p_id >= 2:
-                def on_album_will_accept(e, container=card_container):
+                def on_album_will_accept(e, container=card_border):
                     container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
                     container.update()
 
-                def on_album_leave(e, container=card_container):
+                def on_album_leave(e, container=card_border):
                     container.border = ft.Border.all(2, ft.Colors.TRANSPARENT)
                     container.update()
 
-                def on_album_accept(e, target_playlist_id=p_id, container=card_container):
+                def on_album_accept(e, target_playlist_id=p_id, container=card_border):
                     src_control = page.get_control(e.src_id)
                     if src_control is None:
                         return
@@ -1390,11 +1384,7 @@ def App(page: ft.Page):
 
                     elif isinstance(src_data, int):
                         # трек из очереди (там Draggable.data = track_uid)
-                        con_q = sqlite3.connect('queue.db')
-                        cur = con_q.cursor()
-                        cur.execute("SELECT path FROM queue WHERE uid = ?", (src_data,))
-                        row = cur.fetchone()
-                        con_q.close()
+                        row = ui_utils.db_query_one('queue.db', "SELECT path FROM queue WHERE uid = ?", (src_data,))
                         if row:
                             path_to_add = row[0]
 
@@ -1432,7 +1422,7 @@ def App(page: ft.Page):
     update_albums_ui()
 
     switch_playlists_WZ_view = ft.Container(
-        bgcolor=ft.Colors.RED_900,
+        # bgcolor=ft.Colors.RED_900,
         expand=True,
         content=ft.Column(
             spacing = 5,
@@ -1440,11 +1430,11 @@ def App(page: ft.Page):
                 playlist_data,
                 ft.Container( # строка с альбомами 
                     height=50,
-                    bgcolor=ft.Colors.RED_900,
+                    # bgcolor=ft.Colors.RED_900,
                     content=albums_row
                 ),
                 ft.Container( # рабочая зона
-                        bgcolor=ft.Colors.RED_800,
+                        # bgcolor=ft.Colors.RED_800,
                         content=playlist_list,
                         expand=True
                 ),
@@ -1480,8 +1470,14 @@ def App(page: ft.Page):
                             controls=[
                                 ft.Container(
                                 height=50,
-                                bgcolor=ft.Colors.RED,
+                                # bgcolor=ft.Colors.RED,
                                 border_radius=UBOX_b_radius,
+                                
+                                #Стеклянный эффект
+                                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
+                                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
+                                blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+
                                 padding=5,
                                 expand=1,
                                 content=ft.Row(
@@ -1505,11 +1501,15 @@ def App(page: ft.Page):
                                     padding=5,
                                     expand=2,
 
-                                    image=ft.DecorationImage( #тема - картинка
-                                        src="assets/textures/LBOX.jpg",  # Путь к картинке (локальный или URL)
-                                        fit="cover",                     # Растянуть, чтобы заполнить весь контейнер
-                                        opacity=0.8                      # Можно настроить прозрачность самой текстуры
-                                    ),
+                                    # image=ft.DecorationImage( #тема - картинка
+                                    #     src="assets/textures/LBOX.jpg",  # Путь к картинке (локальный или URL)
+                                    #     fit="cover",                     # Растянуть, чтобы заполнить весь контейнер
+                                    #     opacity=0.8                      # Можно настроить прозрачность самой текстуры
+                                    # ),
+                                    #Стеклянный эффект
+                                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
+                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
+                                    blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
 
                                     content=ft.Column(
                                         spacing=5,
@@ -1558,7 +1558,7 @@ def App(page: ft.Page):
                                             ft.Container( # режимы - плейлиты/онлайн
                                                 height=35,
                                                 width=float('inf'),
-                                                bgcolor=ft.Colors.RED_700,
+                                                # bgcolor=ft.Colors.RED_700,
                                                 content=ft.CupertinoSlidingSegmentedButton(
                                                     selected_index=0,
                                                     expand=True,
@@ -1579,6 +1579,10 @@ def App(page: ft.Page):
                                 ft.Container( #RBOX
                                     #bgcolor=ft.Colors.RED_800, 
                                     border_radius=RBOX_b_radius, 
+                                    #Стеклянный эффект
+                                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
+                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
+                                    blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
                                     padding=5, 
                                     expand=2,
                                     
@@ -1597,9 +1601,15 @@ def App(page: ft.Page):
                             controls=[
                                 ft.Container(
                                 height=150,
-                                bgcolor=ft.Colors.RED, 
+                                # bgcolor=ft.Colors.RED, 
                                 expand=1,
-                                border_radius=DBOX_b_radius, 
+                                border_radius=DBOX_b_radius,
+
+                                #Стеклянный эффект
+                                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
+                                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
+                                blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                 
                                 content=ft.Row(
                                     spacing=10, # Расстояние между элементами внутри
                                     controls=[
@@ -1607,7 +1617,7 @@ def App(page: ft.Page):
                                         ft.Container( # коробка со столбцом метаданных
                                             height=150,
                                             #width=300,
-                                            bgcolor=ft.Colors.RED_800,
+                                            # bgcolor=ft.Colors.RED_800,
                                             expand=4, #1/4
                                             content=ft.Column( # Метаданные трека (Название -> Исполнитель -> Альбом -> Год)
                                                 expand=True,
@@ -1625,7 +1635,7 @@ def App(page: ft.Page):
                                             expand=1,
                                             height=150,
                                             width=80,
-                                            bgcolor=ft.Colors.RED_800,
+                                            # bgcolor=ft.Colors.RED_800,
                                             content=ft.Row(
                                                 alignment=ft.MainAxisAlignment.END,
                                                 controls=[
@@ -1635,7 +1645,7 @@ def App(page: ft.Page):
                                         ),
                                         ft.Container( # коробка главного столбца управления
                                             height=150,
-                                            bgcolor=ft.Colors.RED_800, 
+                                            # bgcolor=ft.Colors.RED_800, 
                                             expand=6, #2/4
                                             content=ft.Column( #главный столбец управления
                                                 spacing=2,
@@ -1643,7 +1653,7 @@ def App(page: ft.Page):
                                                 controls=[
                                                     ft.Container( # кнопки кправления
                                                         #expand=2,
-                                                        bgcolor=ft.Colors.RED_900, 
+                                                        # bgcolor=ft.Colors.RED_900, 
                                                         alignment=ft.Alignment.BOTTOM_CENTER,
                                                         content=ft.Row(
                                                             alignment=ft.MainAxisAlignment.CENTER,
@@ -1672,7 +1682,7 @@ def App(page: ft.Page):
                                             expand=1,
                                             height=150,
                                             width=80,
-                                            bgcolor=ft.Colors.RED_800,
+                                            # bgcolor=ft.Colors.RED_800,
                                             content=ft.Row( 
                                                 alignment=ft.MainAxisAlignment.START,
                                                 controls=[
@@ -1682,17 +1692,17 @@ def App(page: ft.Page):
                                         ),
                                         ft.Container( # коробка заглушка2
                                             height=150,
-                                            bgcolor=ft.Colors.RED_800, 
+                                            # bgcolor=ft.Colors.RED_800, 
                                             expand=4, #1/4
                                             content=ft.Column(
                                                 spacing=5,
                                                 controls=[
                                                     ft.Container(
-                                                        bgcolor=ft.Colors.RED_900, 
+                                                        # bgcolor=ft.Colors.RED_900, 
                                                         expand=4,
                                                     ),
                                                     ft.Container(
-                                                        bgcolor=ft.Colors.RED_900, 
+                                                        # bgcolor=ft.Colors.RED_900, 
                                                         expand=3,
                                                         content=ft.Row(
                                                             spacing=0,
@@ -1709,7 +1719,7 @@ def App(page: ft.Page):
                                                                     ),
                                                                 ),
                                                                 ft.Container(
-                                                                    bgcolor=ft.Colors.RED_900,
+                                                                    # bgcolor=ft.Colors.RED_900,
                                                                     expand=1,
                                                                     content = vol_label
                                                                 )
@@ -1717,7 +1727,7 @@ def App(page: ft.Page):
                                                         )
                                                     ),
                                                     ft.Container(
-                                                        bgcolor=ft.Colors.RED_900, 
+                                                        # bgcolor=ft.Colors.RED_900, 
                                                         expand=4,
                                                     )
                                                 ]
@@ -1726,7 +1736,7 @@ def App(page: ft.Page):
                                         ft.Container( # коробка заглушка3
                                             height=150,
                                             width=150,
-                                            bgcolor=ft.Colors.RED_800,
+                                            # bgcolor=ft.Colors.RED_800,
                                             content=ft.Column(
                                                 spacing=15,
                                                 alignment=ft.MainAxisAlignment.CENTER,
@@ -1743,10 +1753,7 @@ def App(page: ft.Page):
             )
         )
     )
-    if playlist_ids:
-        playlist_ui(page, playlist_list, play_btn, playlist_idl=playlist_ids[1])
-    else:
-        playlist_ui(page, playlist_list, play_btn, playlist_idl=2)
+    playlist_ui(page, playlist_list, play_btn, playlist_idl=2)
 
     def on_tags_changed(topic, message):
         track_title.value = message.get("Название", "Неизвестно")
