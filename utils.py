@@ -12,7 +12,9 @@ import logging
 logger = logging.getLogger(__name__)
 #ИМПОРТ И ПРОВЕРКА VLC СРАЗУ ПОСЛЕ ЗАГРУЗКИ ФАЙЛА ---
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
+import app_env
+
+base_dir = app_env.APP_DIR
 vlc_dir = os.path.join(base_dir, 'vlc_engine')
 vlc_dll_path = os.path.join(vlc_dir, 'libvlc.dll')
 if os.path.exists(vlc_dll_path):

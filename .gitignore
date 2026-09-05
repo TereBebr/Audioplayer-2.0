@@ -7,3 +7,6 @@ gui.py
 dist/
 build/
 *.spec
+!player.spec
+Player-windows.zip
+flet_client/

@@ -1,4 +1,5 @@
 import flet as ft
+import app_env
 import asyncio
 import functools
 import ui_utils
@@ -2075,4 +2076,4 @@ def App(page: ft.Page):
 
     ui_utils.bg_ui_process(page, play_btn)
 
-ft.app(target=App, assets_dir="assets")
+ft.app(target=App, assets_dir=app_env.path("assets"))

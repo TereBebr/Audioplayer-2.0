@@ -1,3 +1,6 @@
+import app_env
+app_env.setup()
+
 #import mutagen
 #from mutagen.mp3 import MP3
 #from mutagen.flac import FLAC
@@ -42,7 +45,7 @@ import database
 if __name__ == "__main__":
     
     # путь к папке VLC движка
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = app_env.APP_DIR
     vlc_dir = utils.import_VLC(base_dir)
 
     #file_path = "music/used"
