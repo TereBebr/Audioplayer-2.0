@@ -20,3 +20,26 @@ start_vol_val = 35
 
 ; Начальная папка в проводнике, по стандарту ./music
 start_path = ./music
+
+[Hotkeys]
+
+; Тут используются общие клавиши независимо от раскладки. Обычные символы пишем в виде: N, K, 4 и тд.
+; Спец символы: Enter, Backspace, Caps Lock, Cntrl, Escape и тд. Нумпадовские через Numpad 1, стрелки в виде Arrow Right
+
+; 1. Играть/Пауза
+pause_key = Space
+
+;Нужна ли доп клавиша? Напишми ее, если None то нет.
+second_pause_key = None
+
+; 2. Следующий трек
+next_key = Arrow Right
+
+;Нужна ли доп клавиша? Напишми ее, если None то нет.
+second_next_key = Cntrl
+
+; 3. Предыдущий трек
+previous_key = Arrow Left
+
+;Нужна ли доп клавиша? Напишми ее, если None то нет.
+second_previous_key = Cntrl

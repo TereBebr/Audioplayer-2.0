@@ -135,8 +135,19 @@ match method_tracks_settings:
 # k_tracks = 0.6
 # playlist_tracks_cell = ((46 * k_playlist_tracks + 8.2), (12 * k_playlist_tracks + 5.4), (12 * k_playlist_tracks + 2.4), (4 * k_playlist_tracks - 1.2), (15 * k_playlist_tracks - 4), (76 * k_playlist_tracks + 4.2))
 
+# ====== Конфиги клавиш ==========
+pause_key = config.get('Hotkeys', 'pause_key')
+if pause_key in ("space", "Space"): pause_key = " "
+second_pause_key = config.get('Hotkeys', 'second_pause_key')
 
-# ============================
+next_key = config.get('Hotkeys', 'next_key')
+if next_key in ("space", "Space"): pause_key = " "
+second_next_key = config.get('Hotkeys', 'second_next_key')
+
+previous_key = config.get('Hotkeys', 'previous_key')
+if previous_key in ("space", "Space"): pause_key = " "
+second_previous_key = config.get('Hotkeys', 'second_previous_key')
+# ================================
 
 playlist_id = 2
 playlist_name = "Избранное"
@@ -1679,6 +1690,37 @@ def App(page: ft.Page):
         # Обновляем оба контейнера (или их общего родителя)
         switch_playlists_WZ_view.update()
         switch_online_WZ_view.update()
+
+    # Клавиши -------------------
+
+    def check_shortcut(e: ft.KeyboardEvent, key, mod_key=None):
+        if (e.key).lower() != key.lower(): return False
+
+        mod = (str(mod_key)).lower() if mod_key else "none"
+
+        if mod in ("cntrl", "ctrl", "control"):
+            return e.ctrl and not (e.alt or e.shift)
+        elif mod == "alt":
+            return e.alt and not (e.ctrl or e.shift)
+        elif mod == "shift":
+            return e.shift and not (e.ctrl or e.alt)
+        elif mod in ("none", "null", ""):
+            return not (e.ctrl or e.alt or e.shift)
+        return False
+
+    def on_keyboard(e: ft.KeyboardEvent, play_btn):
+        print(f"Key pressed: {e.key} (ctrl={e.ctrl}, alt={e.alt}, shift={e.shift})")
+
+        if check_shortcut(e, pause_key, second_pause_key):
+            ui_utils.playpause_btn_ev(e, play_btn)
+
+        elif check_shortcut(e, next_key, second_next_key):
+            ui_utils.play_next_or_pred(e, True, play_btn)
+
+        elif check_shortcut(e, previous_key, second_previous_key):
+            ui_utils.play_next_or_pred(e, False, play_btn)
+
+    page.on_keyboard_event = lambda e: on_keyboard(e, play_btn)
     
     # UI ------------------------
     page.add(
