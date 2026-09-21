@@ -1,0 +1,5 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+mutagen==1.47.0
+tinytag>=2.0
+Pillow>=10

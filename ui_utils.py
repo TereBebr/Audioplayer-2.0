@@ -18,6 +18,7 @@ from contextlib import closing
 from mutagen.flac import FLACNoHeaderError
 import subprocess
 import logging
+import sources
 
 logger = logging.getLogger(__name__)
 
@@ -87,229 +88,67 @@ def change_color(e): #изменение цвета кнопки при наве
         e.control.scale = 1.0          # Возвращаем исходный размер
     e.control.update()
 
-def extract_cover(audio, tec_audio_info_num, path):
-        raw_data = None
-        
-        if tec_audio_info_num == 1: #mp3, ogg
-            if hasattr(audio, 'tags') and audio.tags is not None:
-                for tag in audio.tags.values():
-                    if hasattr(tag, 'data') and (hasattr(tag, 'type') and 'pic' in str(tag).lower() or isinstance(tag, APIC)): # type: ignore
-                        raw_data = tag.data
-                        break
-        elif tec_audio_info_num == 2: #flac, wav
-            if hasattr(audio, 'pictures') and audio.pictures:
-                raw_data = audio.pictures[0].data
-        if not raw_data:
-            folder_path = os.path.dirname(path)
-            for cover_name in possible_covers:
-                cover_path = os.path.join(folder_path, cover_name)
-
-                if os.path.exists(cover_path):
-                    image = Image.open(cover_path)
-                    if image.mode in ("RGBA", "P"):
-                        image = image.convert("RGB")  
-                    output_buffer = io.BytesIO()
-                    image.save(output_buffer, format="JPEG", quality=90) #q=90-95
-                    full_cover_bytes = output_buffer.getvalue()
-                    return full_cover_bytes
-        return raw_data
-
-def extract_cover_miniature(path): # Извлечение миниатюры 50x50p
-    global possible_covers
-    # if not os.path.exists(path):
-    #     return None
-    raw_data = None
-    # === ШАГ 1: Извлечение оригинальных байтов ===
-    try:
-        try:
-            audio = mutagen.File(path)
-        except Exception as e:
-            audio = utils.detect_and_load_audio(path)
-            # print(e)
-        
-        # (ID3)
-        if audio:
-            if hasattr(audio, 'tags') and audio.tags:
-                for tag in audio.tags.values():
-                    if isinstance(tag, APIC) or (hasattr(tag, 'type') and 'pic' in str(tag).lower()): # type: ignore
-                        raw_data = tag.data
-                        break
-            
-            # (FLAC, OGG, некоторые MP4)
-            if not raw_data and hasattr(audio, 'pictures') and audio.pictures:
-                raw_data = audio.pictures[0].data
-
-    except Exception as e:
-        logger.info(f"Ошибка при чтении тегов из {path}: {e}. Идет поиск обложки в папке")
-
-    # === ШАГ 2: Сжатие для базы данных ===
-    if raw_data:
-        try:
-            image = Image.open(io.BytesIO(raw_data))
-            
-            # Убираем альфа-канал, если это PNG, чтобы JPEG не выдал ошибку
-            if image.mode in ("RGBA", "P"):
-                image = image.convert("RGB")
-            
-            image.thumbnail((50,50), Image.Resampling.LANCZOS)
-            # Сохраняем в новый байтовый буфер
-            output_buffer = io.BytesIO()
-            image.save(output_buffer, format="JPEG", quality=85)
-            
-            return output_buffer.getvalue()
-            
-        except Exception as e:
-            logger.info(f"Ошибка при сжатии картинки {path}: {e}")
-            # Если Pillow не смог прочитать байты (битая картинка), 
-            # возвращаем оригинальные байты как страховку
-            return raw_data
-    else:
-        folder_path = os.path.dirname(path) 
-        for cover_name in possible_covers:
-            cover_path = os.path.join(folder_path, cover_name)
-
-            if os.path.exists(cover_path):
-                logger.info(f"Найдена локальная обложка: {cover_path}")
-                try:
-                    image = Image.open(cover_path)
-                    
-                    if image.mode in ("RGBA", "P"):
-                        image = image.convert("RGB")    
-                    image.thumbnail((50,50), Image.Resampling.LANCZOS)
-                    output_buffer = io.BytesIO()
-                    image.save(output_buffer, format="JPEG", quality=85)
-                    return output_buffer.getvalue()
-                
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке локального cover.jpg в папке {folder_path}: {e}")
-    logger.debug(f"Обложка для {path} не найдена ни в тегах, ни в папке.")
-    return None
-
 #Функции проводника ----
 
-def get_folder_content(folder_path: str | Path):#анализ текущей папки (выбранной)
-    path = Path(folder_path)
-    if not path.exists() or not path.is_dir():
-        # Возвращаем ровно то же, что и успешная ветка — один список.
-        # Раньше здесь был кортеж [], [], и вызывающий код падал на
-        # items[0]["path"] с TypeError (например, если start_path из
-        # конфига не существует — приложение не запускалось вообще)
-        logger.info(f"Папка {path} не существует или недоступна")
-        return []
-    folders = []
-    tracks = []
-
-    try:
-        for obj in path.iterdir(): #iterdir работает очень быстро для одной директории
-            if obj.is_dir():
-                folders.append({"name": obj.name, "path": str(obj), "type": "folder"})
-            elif obj.is_file() and obj.suffix.lower() in SUPPORTED_FORMATS:
-                tracks.append({"name": obj.name, "path": str(obj), "type": "track"})
-    except PermissionError:
-        # Защита от системных папок, куда Windows не пускает
-        pass
-
-    #Виды сортировок // потом как-нибудь
-    match sorttype:
-        case 0: 
-            folders.sort(key=lambda x: x["name"].lower())
-            tracks.sort(key=lambda x: x["name"].lower())
-        case 1:
-            pass
-
-    return folders + tracks
 
 def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на объект
-        text = e.control.data
-        p = Path(text).resolve()
-        if p.is_dir():
-            logger.info(f"папка: {p}")
-            new_items = fnew_path(p)
-            rebuild_callback(new_items, p)    # Вызываем функцию перерисовки UI
+        uri = e.control.data
+        src = sources.get(uri)
+        if src.is_dir(uri):
+            rebuild_callback(src.list_dir(uri), uri)
         else:
-            #в 0 эл. очереди
-            try:
-                audio = mutagen.File(p)
-            except Exception as ex:
-                audio = utils.detect_and_load_audio(p)
-                # print(e)
-            
-            if audio:
-                logger.debug("Файл успешно открыт:", audio.get('title'))
-            # else:
-            #     print("Ошибка: файл не удалось открыть даже после исправления.")
-
-            tags = utils.get_audio_tags(audio, p)
-            miniature = extract_cover_miniature(p)
+            tags = src.meta(uri)
+            miniature = src.cover(uri, "50")
 
             try:
                 with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
                     with con_queue: # транзакция: commit при успехе, rollback при ошибке
                         con_queue.execute('DELETE FROM queue WHERE id = ?', (0,))
                         con_queue.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                                          (0, tags["Название"] if tags["Название"] else p.name, tags["Автор"], str(p), miniature))
+                                          (0, tags["Название"], tags["Автор"], uri, miniature))
             except sqlite3.Error as ex:
                 logger.error(f"Ошибка БД при постановке трека в очередь: {ex}")
                 return
 
-            load_track(e.page, p, play_btn_obj, -2)  # было 0
-            # e.page.pubsub.send_all_on_topic("queue_advanced", 1)
-            logger.info(f"файл: {p}")
-
-def fnew_path(p):
-    folder_items = get_folder_content(p)
-    #print(p)
-    return folder_items
+            load_track(e.page, uri, play_btn_obj, -2)  # было 0
+            logger.info(f"файл: {uri}")
 
 def on_accept_drag(e): #Конец перетаскивания
      pass
 
-def open_file_folder(e, path):
+def open_file_folder(e, uri):
+    # «Расположение файла»: у RemoteSource reveal — пустышка, ничего не откроется
     try:
-        p = Path(path).resolve()
-        if p.is_dir():
-            # os.path.normpath(path)
-            os.startfile(p)
-        else:
-            os.startfile(p.parent)
+        sources.get(uri).reveal(uri)
     except Exception as ex:
-            logger.error(f"Не найдена дирректория {path}")
-            return
+        logger.error(f"Не найдена директория {uri}: {ex}")
 
-def open_file_in_player_explorer(e, path, rebuild_callback):
-    try:
-        p = Path(path).resolve()
-        if p.is_dir():
-            new_items = fnew_path(p)
-        else:
-            p = p.parent
-            new_items = fnew_path(p)
-    except Exception as ex:
-        logger.error(f"Не найдена директория {path}: {ex}")
+def open_file_in_player_explorer(e, uri, rebuild_callback):
+    src = sources.get(uri)
+    folder = uri if src.is_dir(uri) else src.parent(uri)
+    if not src.is_dir(folder):
+        logger.error(f"Не найдена директория {folder}")
         return
-    rebuild_callback(new_items, p)
+    rebuild_callback(src.list_dir(folder), folder)
 
 
 #строка пути
 def on_segment_click(e, target_path, rebuild_callback):
     """Срабатывает при клике на сегмент (TextSpan) пути."""
-    p = Path(target_path).resolve()
-    if p.exists() and p.is_dir():
-        new_items = get_folder_content(p) 
-        rebuild_callback(new_items, p)
+    src = sources.get(target_path)
+    if src.is_dir(target_path):
+        rebuild_callback(src.list_dir(target_path), target_path)
     else:
-        logger.info(f"{p} не существует")
+        logger.info(f"{target_path} не существует")
 
 
 def on_dialog_result(directory_path, rebuild_callback):
-    """Срабатывает, когда пользователь выбрал папку в системном окне."""
-    p = Path(directory_path).resolve()
-    
-    if p.exists() and p.is_dir():
-        new_items = get_folder_content(p) # Твоя функция чтения папки
-        rebuild_callback(new_items, p)
+    """Срабатывает, когда пользователь выбрал папку в системном окне (всегда локальная)."""
+    src = sources.get(directory_path)
+    if src.is_dir(directory_path):
+        rebuild_callback(src.list_dir(directory_path), directory_path)
     else:
-        logger.debug(f"Выбранная папка {p} не существует или недоступна")
+        logger.debug(f"Выбранная папка {directory_path} не существует или недоступна")
 
 #Функции кнопок ----
 
@@ -375,22 +214,17 @@ def vol_slider_event(e, vol_label):
 
 #Логика воспроизведение аудио ----
 
-def load_track(page,path, play_btn_obj, idx): #через проводник
+def load_track(page, uri, play_btn_obj, idx): #через проводник
     global player, tags, details, tec_audio_info_num, curr_sec, total_sec, is_paused
     curr_sec = 0
     total_sec = 0
-    p = Path(path).resolve()
-    
-    try:
-        audio = mutagen.File(p)
-        if audio is None:
-            raise ValueError("Файл не распознан")
-    except Exception:
-        audio = utils.detect_and_load_audio(p)
+
+    src = sources.get(uri)
+    mrl = src.mrl(uri)
 
     if player:
         player.stop()
-        player.set_mrl(p)
+        player.set_mrl(mrl)
         if autoplayswitch == False:
             player.play()
             play_btn_obj.src = "assets/icons/pause_ico_inac.png"
@@ -400,7 +234,7 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
             is_paused = False
         play_btn_obj.update()
     else:
-        player = utils.create_player(p, start_vol_val)
+        player = utils.create_player(mrl, start_vol_val)
         time.sleep(0.5)
         #vol_slider.set(self.player.audio_get_volume())
         #vol_label.configure(text=f"{self.player.audio_get_volume()}%")
@@ -408,11 +242,9 @@ def load_track(page,path, play_btn_obj, idx): #через проводник
         is_paused = False
         play_btn_obj.src = "assets/icons/pause_ico_inac.png"
         play_btn_obj.update()
-    tags = utils.get_audio_tags(audio, p)
-    tec_audio_info_num = utils.tec_info(audio)
-    details = utils.get_audio_info(audio, tec_audio_info_num)
-    #cover = extract_cover(audio, tec_audio_info_num, p)
-    tags["cover"] = extract_cover(audio, tec_audio_info_num, p)
+    tags = src.meta(uri)
+    details = src.details(uri)
+    tags["cover"] = src.cover(uri, "full")
     tags["idx"] = idx
     page.pubsub.send_all_on_topic("tags_update", tags)
     # очистка истории < max_histlen
@@ -457,18 +289,10 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
     else:
         logger.info("В очереди нет треков для воспроизведения")
 
-def add_queue(p, insert_at): # <--- Добавили аргумент insert_at
-    path = Path(p)
-    files_to_add = []
-
-    if path.is_dir():
-        pattern = path.rglob('*') if idxDirrs else path.iterdir()
-        for obj in pattern:
-            if obj.is_file() and obj.suffix.lower() in SUPPORTED_FORMATS:
-                files_to_add.append(obj)
-    elif path.is_file():
-        if path.suffix.lower() in SUPPORTED_FORMATS:
-            files_to_add.append(path)
+def add_queue(uri, insert_at): # <--- Добавили аргумент insert_at
+    src = sources.get(uri)
+    # expand отдаёт плоский список URI треков; одиночный файл — список из одного
+    files_to_add = src.expand(uri) if src.is_dir(uri) else [uri]
 
     if not files_to_add:
         return
@@ -489,29 +313,22 @@ def add_queue(p, insert_at): # <--- Добавили аргумент insert_at
             start_id = insert_at
             
         current_id = start_id
-        for obj in files_to_add:
+        for track_uri in files_to_add:
             try:
-                try:
-                    audio = mutagen.File(obj)
-                except Exception as e:
-                    audio = utils.detect_and_load_audio(obj)
-                    # print(e)
-                if audio:
-                    logger.info("Файл успешно открыт:", audio.get('title'))
-                # else:
-                #     print("Ошибка: файл не удалось открыть даже после исправления.")
-
-                tags = utils.get_audio_tags(audio, obj)
-                name = tags["Название"] if tags.get("Название") else obj.name
-                author = tags.get("Автор", "Неизвестно")
-                miniature = extract_cover_miniature(obj)
+                # источник берём для каждого трека: папка может быть локальной,
+                # а внутри — только локальные, но у RemoteSource это будет иначе
+                src = sources.get(track_uri)
+                tags = src.meta(track_uri)
+                name = tags["Название"]
+                author = tags.get("Автор") or "Неизвестно"
+                miniature = src.cover(track_uri, "50")
 
                 cursor.execute(
                     "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                    (current_id, name, author, str(obj), miniature))
+                    (current_id, name, author, track_uri, miniature))
                 current_id += 1
             except Exception as e:
-                logger.error(f"Ошибка чтения файла {obj}: {e}")
+                logger.error(f"Ошибка чтения файла {track_uri}: {e}")
         
         con_queue.commit()
     except Exception as e:
@@ -540,42 +357,30 @@ def mix_queue(rebuild_queue):
 #----
 # Плейлисты ----
 
-def add_track_to_playlist(p, playlist_id, insert_at=None):
-    path = Path(p)
-    files_to_add = []
+def add_track_to_playlist(uri, playlist_id, insert_at=None):
+    src = sources.get(uri)
+    files_to_add = src.expand(uri) if src.is_dir(uri) else [uri]
 
-    if path.is_dir():
-        pattern = path.rglob('*') if idxDirrs else path.iterdir()
-        for obj in pattern:
-            if obj.is_file() and obj.suffix.lower() in SUPPORTED_FORMATS:
-                files_to_add.append(obj)
-    elif path.is_file():
-        if path.suffix.lower() in SUPPORTED_FORMATS:
-            files_to_add.append(path)
     if not files_to_add:
         return
-    
+
     tracks_data = []
-    for obj in files_to_add:
+    for track_uri in files_to_add:
         try:
-            try:
-                audio = mutagen.File(obj)
-            except Exception as e:
-                audio = utils.detect_and_load_audio(obj)
-                logger.debug(f"Mutagen не справился с {obj.name}, fallback: {e}")
-            tags = utils.get_audio_tags(audio, obj)
-            name = tags["Название"] if tags.get("Название") else obj.name
-            author = tags.get("Автор", "Неизвестно")
-            miniature = extract_cover_miniature(obj) #TODO: перевести на файловую систему
+            src = sources.get(track_uri)
+            tags = src.meta(track_uri)
+            name = tags["Название"]
+            author = tags.get("Автор") or "Неизвестно"
+            miniature = src.cover(track_uri, "50") #TODO: перевести на файловую систему
 
             tracks_data.append({
-                "path": str(obj),
+                "path": track_uri,
                 "name": name,
                 "author": author,
                 "cov_bytes": miniature
             })
         except Exception as e:
-            logger.error(f"Ошибка чтения файла {obj}: {e}")
+            logger.error(f"Ошибка чтения файла {track_uri}: {e}")
     if not tracks_data:
         return
     
@@ -648,22 +453,17 @@ def add_playlist_to_queue(playlist_id, insert_at=None):
 
     queue_records = []
     for track in tracks:
-        default_name, default_author, raw_path, cov_bytes = track
-        path_obj = Path(raw_path)
+        default_name, default_author, uri, cov_bytes = track
 
         try:
-            try:
-                audio = mutagen.File(path_obj)
-            except Exception:
-                audio = utils.detect_and_load_audio(path_obj)
+            src = sources.get(uri)
+            tags = src.meta(uri)
+            name = tags.get("Название") or default_name
+            author = tags.get("Автор") or default_author
 
-            tags = utils.get_audio_tags(audio, path_obj) if audio else {}
-            name = tags.get("Название") or default_name or path_obj.name
-            author = tags.get("Автор") or default_author or "Неизвестно"
-
-            queue_records.append((name, author, str(path_obj), cov_bytes))
+            queue_records.append((name, author, uri, cov_bytes))
         except Exception as e:
-            logger.error(f"Ошибка обработки файла {path_obj}: {e}")
+            logger.error(f"Ошибка обработки файла {uri}: {e}")
 
     if not queue_records:
         return

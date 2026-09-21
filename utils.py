@@ -79,7 +79,7 @@ def get_audio_info(audio, tec_audio_info_num):
             bits = getattr(data, 'bits_per_sample', None)
             if bits:
                 details["Глубина бит"] = bits
-        case 1: #MP3
+        case 1: #MP3    
             details = {
                 "Длительность": f"{data.length:.2f} сек",
                 "Частота": f"{data.sample_rate} Гц",

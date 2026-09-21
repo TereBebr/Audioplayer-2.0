@@ -10,3 +10,5 @@ build/
 !player.spec
 Player-windows.zip
 flet_client/
+server/covers/
+docs/

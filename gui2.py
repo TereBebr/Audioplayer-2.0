@@ -3,6 +3,7 @@ import app_env
 import asyncio
 import functools
 import ui_utils
+import sources
 from pathlib import Path
 from ui_utils import bg_ui_process
 import os
@@ -25,7 +26,7 @@ config.read('config.txt', encoding='utf-8')
 start_vol_val = config.getint('Main Settings', 'start_vol_val')
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
 p = config.get('Main Settings', 'start_path', fallback='./music') # Начальная папка
-folder_items = ui_utils.fnew_path(p) # Oбработчик для начальной папки
+folder_items = sources.get(p).list_dir(p) # содержимое начальной папки
 # =================
 
 config.read('ui_config.txt', encoding='utf-8')
@@ -598,23 +599,22 @@ def App(page: ft.Page):
                 search_input.update()
 
         explorer_tree.controls.clear()
-        current_dir = Path(current_dir).resolve()
+        # current_dir — это URI (строка). Всё, что нужно знать о нём, спрашиваем у источника:
+        # ни Path(), ни .parent здесь быть не должно — для srv:// они сломаются
+        src = sources.get(current_dir)
 
         # --- АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ АДРЕСНОЙ СТРОКИ ПРИ СМЕНЕ ПАПКИ ---
-        path_text.spans = build_breadcrumbs(str(current_dir))
+        path_text.spans = build_breadcrumbs(src.display_path(current_dir))
 
-        try:        
+        try:
             if path_text.page: path_text.update()
         except RuntimeError:
             pass
         # ----------------------------------------------------------------
-        current_dir = Path(current_dir).resolve()
-        start_dir = Path(current_dir).resolve()
-        current_path = Path(items[0]["path"]).parent if items else None
 
         explorer_tree.controls.append( #Верхняя кнопка
                 ft.GestureDetector(
-                    data=str(current_dir.parent),
+                    data=src.parent(current_dir),
                     on_double_tap=lambda e: ui_utils.on_item_click(e, rebuild_explorer, play_btn),
                     mouse_cursor=ft.MouseCursor.CLICK,
                     content=ft.Row([
@@ -634,7 +634,7 @@ def App(page: ft.Page):
             )
         else: #Элементы
             for item in items:
-                full_item_path = str(Path(item["path"]))
+                full_item_path = item["path"]   # уже URI — как отдал list_dir
                 explorer_tree.controls.append(
                     ft.Draggable(
                         group="queue_drag",
@@ -687,7 +687,9 @@ def App(page: ft.Page):
                 sub_path = segments[0] + "/" + "/".join(segments[1:i+1])
             else:
                 sub_path = "/" + "/".join(segments[:i+1])
-            sub_path = str(Path(sub_path).resolve())
+            # Для локального пути это тот же str(Path(...).resolve()), что был раньше.
+            # Э4: для srv:// крошки собираются иначе — display_path ≠ URI
+            sub_path = sources.get(sub_path).display_path(sub_path)
 
             # Замораживаем sub_path через дефолтный аргумент лямбды (p=sub_path)
             spans.append(
@@ -1187,7 +1189,7 @@ def App(page: ft.Page):
     )
     # Объявления объектов -----
 
-    track_title = ft.Text(tags["Название"] if tags["Название"] else Path(p).name, size=text_size + 2, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
+    track_title = ft.Text(tags["Название"] or "Выберите трек", size=text_size + 2, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
     track_artist = ft.Text(tags["Автор"] if tags["Автор"] else "Исполнитель", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
     track_album = ft.Text(tags["Альбом"] if tags["Альбом"] else "Альбом", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
     track_year = ft.Text(tags["Год"] if tags["Год"] else "Год", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
@@ -1357,7 +1359,7 @@ def App(page: ft.Page):
                 with con_q:
                     con_q.execute('DELETE FROM queue WHERE id = ?', (0,))
                     con_q.execute("INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                                  (0, t_name if t_name else Path(t_path).name, t_author, str(t_path), t_cov))
+                                  (0, t_name, t_author, t_path, t_cov))
         except sqlite3.Error as ex:
             logger.error(f"Ошибка БД очереди: {ex}")
             return
