@@ -8,6 +8,7 @@ from mutagen.mp4 import MP4
 from pathlib import Path
 import pathlib
 import logging
+import sources
 
 logger = logging.getLogger(__name__)
 #ИМПОРТ И ПРОВЕРКА VLC СРАЗУ ПОСЛЕ ЗАГРУЗКИ ФАЙЛА ---
@@ -177,7 +178,8 @@ def create_player(path, start_vol_val):
         '--no-video', 
         '--quiet',
         '--audio-filter=normvol',
-        '--norm-max-level=2.0' 
+        '--norm-max-level=2.0',
+        f'--network-caching={sources.SRV_CACHING}',
     ]
     instance = vlc.Instance(*vlc_args)
 

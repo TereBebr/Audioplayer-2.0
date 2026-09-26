@@ -8,12 +8,8 @@ from config import load_config
 from importlib.metadata import version
 app = FastAPI()
 
-'''
-fastapi dev desktop\server\server.py
+# fastapi dev desktop\server\server.py
 
-эндпоинты: 3/8
-
-'''
 
 cfg = load_config()
 db.init_db(cfg.db_path)
@@ -87,6 +83,15 @@ def get_folder_content(folder_path: str):
         tracks = [dict(r) | {"type": "track"} for r in db.tracks_in_dir(con, folder_path)]
     return folders + tracks
 
+@app.get("/server/tracks_under")
+def tracks_under(folder_path: str = ""):
+    """Треки папки и всех подпапок — для «добавить папку в очередь» на клиенте."""
+    folder = safe_path(folder_path)
+    if not folder.is_dir():
+        raise HTTPException(404, "folder not found")
+    with closing(db.get_conn(cfg.db_path)) as con:
+        return [dict(r) for r in db.tracks_under_dir(con, folder_path)]
+
 @app.get("/server/search")
 def all_library_search(filename: str):
     with closing(db.get_conn(cfg.db_path)) as con:
@@ -141,3 +146,9 @@ def rescan(full: bool = False):
             raise HTTPException(409, "scan already running")
     threading.Thread(target=indexer.scan, args=(cfg,), kwargs={"full": full}, daemon=True).start()
     return {"started": True}
+
+@app.get("/server/tracks_under")
+def tracks_under(folder_path: str = ""):
+    safe_path(folder_path)                       # проверка обхода каталога
+    with closing(db.get_conn(cfg.db_path)) as con:
+        return [dict(r) for r in db.tracks_under_dir(con, folder_path)]

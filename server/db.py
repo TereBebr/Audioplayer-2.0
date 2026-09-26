@@ -123,7 +123,7 @@ def get_cover(con: sqlite3.Connection, id: int):
 def tracks_in_dir(con: sqlite3.Connection, rel_dir: str) -> list[sqlite3.Row]:
     """Треки прямо в папке (без подпапок), для browse."""
     return con.execute(
-        "SELECT id, rel_path, name, author, album, duration, cover_hash "
+        "SELECT * "
         "FROM tracks WHERE dir = ? AND missing = 0 ORDER BY name COLLATE NOCASE",
         (rel_dir,),
     ).fetchall()
@@ -134,11 +134,11 @@ def tracks_under_dir(con: sqlite3.Connection, rel_dir: str) -> list[sqlite3.Row]
     substr вместо LIKE/GLOB: в именах папок бывают %, _ и [ — их пришлось бы экранировать."""
     if rel_dir == "":
         return con.execute(
-            "SELECT id, rel_path, name, author, album, duration, cover_hash "
+            "SELECT * "
             "FROM tracks WHERE missing = 0 ORDER BY rel_path").fetchall()
     prefix = rel_dir + "/"
     return con.execute(
-        "SELECT id, rel_path, name, author, album, duration, cover_hash "
+        "SELECT * "
         "FROM tracks WHERE missing = 0 AND (dir = ? OR substr(dir, 1, ?) = ?) "
         "ORDER BY rel_path",
         (rel_dir, len(prefix), prefix),
@@ -153,7 +153,7 @@ def search_tracks(con: sqlite3.Connection, query: str, limit: int = 200) -> list
     esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pat = f"%{esc}%"
     return con.execute(
-        "SELECT id, rel_path, name, author, album, duration, cover_hash FROM tracks "
+        "SELECT * FROM tracks "
         "WHERE missing = 0 AND (name LIKE ? ESCAPE '\\' OR author LIKE ? ESCAPE '\\' "
         "OR album LIKE ? ESCAPE '\\') "
         "ORDER BY author COLLATE NOCASE, album COLLATE NOCASE, name COLLATE NOCASE LIMIT ?",

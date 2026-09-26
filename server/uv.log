@@ -1,0 +1,28 @@
+INFO:     Started server process [12884]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64821 - "GET /server/browse?folder_path=Limp+Bizkit%2F2005+-+Greatest+Hitz HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64821 - "GET /server/track/1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64845 - "GET /server/track/1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64845 - "GET /server/track/1/cover?size=full HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64844 - "GET /server/stream/1 HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:64847 - "GET /server/stream/1 HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:54627 - "GET /server/tracks_under?folder_path= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/1/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/2/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/3/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/4/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/5/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/6/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/7/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/8/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/9/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/10/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/11/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/12/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/13/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/14/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/15/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/16/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54627 - "GET /server/track/17/cover?size=50 HTTP/1.1" 200 OK
