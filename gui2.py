@@ -1011,7 +1011,7 @@ def App(page: ft.Page):
                     ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                     ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
                     ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
-                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
+                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
                 ]
             ),
             padding=queue_cell[4],
@@ -1479,7 +1479,7 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
-                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer)),
+                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
                     ]
                 ),
                 content_when_dragging=ft.Container(
@@ -1694,6 +1694,79 @@ def App(page: ft.Page):
         switch_playlists_WZ_view.update()
         switch_online_WZ_view.update()
 
+    explorer_local_view = ft.Column(
+        spacing=5,
+        controls=[
+            ft.Row( # Полоска пути
+                spacing=3,
+                controls=[
+                    ft.Container( # Индикатор пути
+                        height=33,
+                        content = address_bar,
+                        expand=True
+                    ),
+                    ft.IconButton( # кнопка выбора папки
+                        height=33,
+                        icon=ft.Icon(
+                            ft.Icons.FOLDER_ROUNDED,
+                            offset=ft.Offset(0, -0.15),
+                            color=adress_ButtonIconCol,
+                        ),                                                        
+                        style=ft.ButtonStyle(
+                            bgcolor=adress_ButtonBGCol,
+                            side=ft.BorderSide(adress_Button_BTol, adress_Button_BCol),
+                            shape=ft.RoundedRectangleBorder(radius=adress_Button_Radius)
+                        ),
+                        on_click = handle_pick_folder
+                    )
+                ]
+            ),
+            search_bar, # Поиск
+            explorer_tree  # динамический проводник
+        ]
+    )
+
+    switch_explorer_local_status = ft.Container(
+        expand=True,
+        content=ft.Container( # рабочая зона
+            content=explorer_local_view,
+            padding=10,
+            expand=True
+        ),
+    )
+    switch_explorer_network_status = ft.Container()
+
+    def on_change_explorer_status(e):
+            switch_explorer_local_status.visible = (e.control.selected_index == 0)
+            switch_explorer_network_status.visible = (e.control.selected_index == 1)
+            # Обновляем оба контейнера (или их общего родителя)
+            switch_explorer_local_status.update()
+            switch_explorer_network_status.update()
+
+    mode_explorer_status_button = ft.CupertinoSlidingSegmentedButton(
+        selected_index=0,
+        expand=True,
+        proportional_width=True,
+        on_change=on_change_explorer_status,
+        controls=[
+            ft.Text("Локальный"),
+            ft.Text("Сервер"),
+        ],
+    )
+
+    def set_explorer_mode(index: int):
+        """
+        Принудительно переключает режим проводника:
+        0 — Локальный
+        1 — Сервер
+        """
+        mode_explorer_status_button.selected_index = index
+        switch_explorer_local_status.visible = (index == 0)
+        switch_explorer_network_status.visible = (index == 1)
+        mode_explorer_status_button.update()
+        switch_explorer_local_status.update()
+        switch_explorer_network_status.update()
+    
     # Клавиши -------------------
 
     def check_shortcut(e: ft.KeyboardEvent, key, mod_key=None):
@@ -1787,34 +1860,16 @@ def App(page: ft.Page):
                                     blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
 
                                     content=ft.Column(
-                                        spacing=5,
+                                        spacing=0,
                                         controls=[
-                                            ft.Row( # Полоска пути
-                                                spacing=3,
-                                                controls=[
-                                                    ft.Container( # Индикатор пути
-                                                        height=33,
-                                                        content = address_bar,
-                                                        expand=True
-                                                    ),
-                                                    ft.IconButton( # кнопка выбора папки
-                                                        height=33,
-                                                        icon=ft.Icon(
-                                                            ft.Icons.FOLDER_ROUNDED,
-                                                            offset=ft.Offset(0, -0.15),
-                                                            color=adress_ButtonIconCol,
-                                                        ),                                                        
-                                                        style=ft.ButtonStyle(
-                                                            bgcolor=adress_ButtonBGCol,
-                                                            side=ft.BorderSide(adress_Button_BTol, adress_Button_BCol),
-                                                            shape=ft.RoundedRectangleBorder(radius=adress_Button_Radius)
-                                                        ),
-                                                        on_click = handle_pick_folder
-                                                    )
-                                                ]
+                                            ft.Container( # режимы - локальный/серверный
+                                                # height=35,
+                                                width=float('inf'),
+                                                # bgcolor=ft.Colors.RED_700,
+                                                content=mode_explorer_status_button
                                             ),
-                                            search_bar, # Поиск
-                                            explorer_tree  # динамический проводник
+                                            switch_explorer_local_status,
+                                            switch_explorer_network_status
                                         ]
                                     )
                                 ),               

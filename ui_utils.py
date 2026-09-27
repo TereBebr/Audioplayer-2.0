@@ -123,14 +123,17 @@ def open_file_folder(e, uri):
     except Exception as ex:
         logger.error(f"Не найдена директория {uri}: {ex}")
 
-def open_file_in_player_explorer(e, uri, rebuild_callback):
+def open_file_in_player_explorer(e, uri, rebuild_callback, explorer_mode):
     src = sources.get(uri)
     folder = uri if src.is_dir(uri) else src.parent(uri)
     if not src.is_dir(folder):
         logger.error(f"Не найдена директория {folder}")
         return
     rebuild_callback(src.list_dir(folder), folder)
-
+    if src.is_remote:
+        explorer_mode(1)
+    else:
+        explorer_mode(0)
 
 #строка пути
 def on_segment_click(e, target_path, rebuild_callback):

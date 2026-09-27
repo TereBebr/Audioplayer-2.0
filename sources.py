@@ -34,6 +34,7 @@ SRV_TIMEOUT = config.getfloat('Server', 'timeout', fallback=5.0)
 SRV_CACHING = config.getint('Server', 'network_caching', fallback=5000)
 
 class LocalSource:
+    is_remote = False
 
     def list_dir(self, folder_path: str):#анализ текущей папки (выбранной)
         path = Path(folder_path)
@@ -314,6 +315,7 @@ class RemoteNotFound(Exception):
     """404/410 — трека нет или файл пропал с диска."""
 
 class RemoteSource:
+    is_remote = True
     def __init__(self):
         self.session = requests.Session()
         self._cache = {}# track_id -> (когда_положили, данные)
