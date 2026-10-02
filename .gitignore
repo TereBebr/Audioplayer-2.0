@@ -11,4 +11,5 @@ build/
 Player-windows.zip
 flet_client/
 server/covers/
-docs/
+docs/server/uv.log
+server/library.db*

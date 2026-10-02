@@ -156,6 +156,10 @@ playlist_name = "Избранное"
 playlist_desk = ""
 playlist_cover_path = ""
 
+start_local_path = p
+start_server_path = f"srv://{sources.SRV_ID}/d"
+last_local_path = ""
+last_server_path = ""
 
 class VirtualList:
     """Оконный ("виртуальный") рендер длинного списка в прокручиваемом ft.Column.
@@ -590,6 +594,7 @@ def App(page: ft.Page):
 
     # Динамический проводник
     def rebuild_explorer(items, current_dir, is_search=False):
+        global last_local_path, last_server_path
         if not is_search:
             explorer_tree.all_items = items
             explorer_tree.current_dir = current_dir
@@ -602,9 +607,13 @@ def App(page: ft.Page):
         # current_dir — это URI (строка). Всё, что нужно знать о нём, спрашиваем у источника:
         # ни Path(), ни .parent здесь быть не должно — для srv:// они сломаются
         src = sources.get(current_dir)
+        if src.is_remote:
+            last_server_path = current_dir
+        else:
+            last_local_path = current_dir
 
         # --- АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ АДРЕСНОЙ СТРОКИ ПРИ СМЕНЕ ПАПКИ ---
-        path_text.spans = build_breadcrumbs(src.display_path(current_dir))
+        path_text.spans = build_breadcrumbs(current_dir)
 
         try:
             if path_text.page: path_text.update()
@@ -673,46 +682,33 @@ def App(page: ft.Page):
                 )
         page.update()
 
-    def build_breadcrumbs(path):
-        normalized_path = path.replace("\\", "/")
-        segments = normalized_path.split("/")
-        segments = [s for s in segments if s]
+    def build_breadcrumbs(uri):
+        """Рисует крошки. Разбором пути занимается источник — здесь только отрисовка."""
         spans = []
-        
-        is_windows = ":" in normalized_path
-        
-        for i, segment in enumerate(segments):
-            # Корректная сборка путей для Windows и Linux
-            if is_windows:
-                sub_path = segments[0] + "/" + "/".join(segments[1:i+1])
-            else:
-                sub_path = "/" + "/".join(segments[:i+1])
-            # Для локального пути это тот же str(Path(...).resolve()), что был раньше.
-            # Э4: для srv:// крошки собираются иначе — display_path ≠ URI
-            sub_path = sources.get(sub_path).display_path(sub_path)
+        segments = sources.get(uri).crumbs(uri)
 
-            # Замораживаем sub_path через дефолтный аргумент лямбды (p=sub_path)
+        for i, (label, sub_uri) in enumerate(segments):
             spans.append(
                 ft.TextSpan(
-                    text=segment,
+                    text=label,
                     style=ft.TextStyle(
-                        color=ft.Colors.BLUE, 
+                        color=ft.Colors.BLUE,
                         decoration=ft.TextDecoration.UNDERLINE,
                         size=text_size  # Синхронизируем с твоим конфигом
                     ),
-                    on_click=lambda e, p=sub_path: ui_utils.on_segment_click(e, p, rebuild_explorer)
+                    # Замораживаем sub_uri через дефолтный аргумент лямбды
+                    on_click=lambda e, u=sub_uri: ui_utils.on_segment_click(e, u, rebuild_explorer)
                 )
             )
-
             if i < len(segments) - 1:
                 spans.append(
                     ft.TextSpan(
-                        text=" / ", 
+                        text=" / ",
                         style=ft.TextStyle(color=ft.Colors.GREY_400, size=text_size)
                     )
                 )
-                
         return spans
+
     path_text = ft.Text(spans=build_breadcrumbs(p), no_wrap=True)
 
     QUEUE_GAP = 8  # вертикальный зазор между ячейками очереди
@@ -978,23 +974,27 @@ def App(page: ft.Page):
     def build_queue_cell(index, row):
         track_id, track_uid, name, author, path, cov_bytes = row
 
+        unavailable = sources.is_remote(path) and not sources.server_online()
         # 1. Визуальное оформление играющего трека (id == 0)
         is_playing = (track_id == 0)
         border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
         bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
 
         # Попытка декодировать обложку (если она есть)
-        cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
         if cov_bytes is not None:
-            cover_img = ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
 
         item_content = ft.Container(
             content=ft.ContextMenu(
                 content=ft.Row([
                     cover_img,
                     ft.Column([
-                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE),
-                        ft.Text(author, size=queue_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                        ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD,
+                                color=ft.Colors.OUTLINE if unavailable
+                                      else (ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE)),
+                        ft.Text(author, size=queue_cell[2],
+                                color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE_VARIANT)
                     ], spacing=queue_cell[3])
                 ]),
                 secondary_items=[
@@ -1010,7 +1010,7 @@ def App(page: ft.Page):
                     ),
                     ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                     ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
-                    ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                    ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p), disabled=sources.is_remote(path)),
                     ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
                 ]
             ),
@@ -1410,17 +1410,20 @@ def App(page: ft.Page):
         track_id, name, author, path, cov_bytes, position = row
         playlist_idl = current_playlist["id"]
 
-        cover_img = ft.Icon(ft.Icons.MUSIC_NOTE, size=track_cell[0])
+        unavailable = sources.is_remote(path) and not sources.server_online()
+        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
         if cov_bytes is not None:
-            cover_img = ft.Image(src=cov_bytes, width=track_cell[0], height=track_cell[0])
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
 
         # Сам контент трека. Здесь вешаем on_double_click
         item_content = ft.Container(
             content=ft.Row([
                 cover_img,
                 ft.Column([
-                    ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD),
-                    ft.Text(author, size=track_cell[2], color=ft.Colors.ON_SURFACE_VARIANT)
+                    ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE),
+                    ft.Text(author, size=track_cell[2],
+                            color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE_VARIANT)
                 ], spacing=track_cell[3])
             ]),
             padding=track_cell[4],
@@ -1478,7 +1481,7 @@ def App(page: ft.Page):
                                 playlist_ui(page, playlist_list, play_btn, pid),
                             ),
                         ),
-                        ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p)),
+                        ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p), disabled=sources.is_remote(path)),
                         ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
                     ]
                 ),
@@ -1694,7 +1697,23 @@ def App(page: ft.Page):
         switch_playlists_WZ_view.update()
         switch_online_WZ_view.update()
 
-    explorer_local_view = ft.Column(
+    pick_folder_button = ft.IconButton( # кнопка выбора папки
+        height=33,
+        icon=ft.Icon(
+            ft.Icons.FOLDER_ROUNDED,
+            offset=ft.Offset(0, -0.15),
+            color=adress_ButtonIconCol,
+        ),                                                        
+        style=ft.ButtonStyle(
+            bgcolor=adress_ButtonBGCol,
+            side=ft.BorderSide(adress_Button_BTol, adress_Button_BCol),
+            shape=ft.RoundedRectangleBorder(radius=adress_Button_Radius)
+        ),
+        on_click = handle_pick_folder,
+        visible=True
+    )
+
+    explorer_view = ft.Column(
         spacing=5,
         controls=[
             ft.Row( # Полоска пути
@@ -1705,20 +1724,7 @@ def App(page: ft.Page):
                         content = address_bar,
                         expand=True
                     ),
-                    ft.IconButton( # кнопка выбора папки
-                        height=33,
-                        icon=ft.Icon(
-                            ft.Icons.FOLDER_ROUNDED,
-                            offset=ft.Offset(0, -0.15),
-                            color=adress_ButtonIconCol,
-                        ),                                                        
-                        style=ft.ButtonStyle(
-                            bgcolor=adress_ButtonBGCol,
-                            side=ft.BorderSide(adress_Button_BTol, adress_Button_BCol),
-                            shape=ft.RoundedRectangleBorder(radius=adress_Button_Radius)
-                        ),
-                        on_click = handle_pick_folder
-                    )
+                    pick_folder_button
                 ]
             ),
             search_bar, # Поиск
@@ -1726,46 +1732,64 @@ def App(page: ft.Page):
         ]
     )
 
-    switch_explorer_local_status = ft.Container(
+    explorer_view.data = {"mode": 0}
+
+    switch_explorer_status = ft.Container(
         expand=True,
         content=ft.Container( # рабочая зона
-            content=explorer_local_view,
-            padding=10,
+            content=explorer_view,
             expand=True
         ),
     )
-    switch_explorer_network_status = ft.Container()
+
+    def open_dir(uri):
+        """Показать папку в проводнике. Единственный способ сменить содержимое:
+        сначала спрашиваем у источника список, потом рисуем."""
+        src = sources.get(uri)
+        rebuild_explorer(src.list_dir(uri), uri)
 
     def on_change_explorer_status(e):
-            switch_explorer_local_status.visible = (e.control.selected_index == 0)
-            switch_explorer_network_status.visible = (e.control.selected_index == 1)
-            # Обновляем оба контейнера (или их общего родителя)
-            switch_explorer_local_status.update()
-            switch_explorer_network_status.update()
+        mode = e.control.selected_index
+
+        # CupertinoSlidingSegmentedButton двигает ползунок даже при disabled,
+        # поэтому проверяем сами и откатываем выбор назад
+        if mode == 1 and not sources.server_online():
+            e.control.selected_index = explorer_view.data["mode"]
+            try:
+                e.control.update()
+            except (RuntimeError, AssertionError):
+                pass
+            logger.info("Сервер не отвечает, переключение отменено")
+            return
+
+        explorer_view.data["mode"] = mode
+
+        if mode == 0:
+            open_dir(last_local_path or start_local_path)
+        else:
+            open_dir(last_server_path or start_server_path)
+        pick_folder_button.update()
+
+    def set_explorer_mode(index: int):
+        """Синхронизировать переключатель с тем, что уже показано в проводнике.
+        Папку НЕ открывает — её открыл тот, кто нас позвал."""
+        explorer_view.data["mode"] = index
+        mode_explorer_status_button.selected_index = index
+        try:
+            mode_explorer_status_button.update()
+        except (RuntimeError, AssertionError):
+            pass
 
     mode_explorer_status_button = ft.CupertinoSlidingSegmentedButton(
         selected_index=0,
         expand=True,
-        proportional_width=True,
+        # proportional_width=True,
         on_change=on_change_explorer_status,
         controls=[
             ft.Text("Локальный"),
             ft.Text("Сервер"),
         ],
     )
-
-    def set_explorer_mode(index: int):
-        """
-        Принудительно переключает режим проводника:
-        0 — Локальный
-        1 — Сервер
-        """
-        mode_explorer_status_button.selected_index = index
-        switch_explorer_local_status.visible = (index == 0)
-        switch_explorer_network_status.visible = (index == 1)
-        mode_explorer_status_button.update()
-        switch_explorer_local_status.update()
-        switch_explorer_network_status.update()
     
     # Клавиши -------------------
 
@@ -1868,8 +1892,7 @@ def App(page: ft.Page):
                                                 # bgcolor=ft.Colors.RED_700,
                                                 content=mode_explorer_status_button
                                             ),
-                                            switch_explorer_local_status,
-                                            switch_explorer_network_status
+                                            switch_explorer_status
                                         ]
                                     )
                                 ),               
@@ -2130,6 +2153,27 @@ def App(page: ft.Page):
     # Регистрация подписчиков по топикам
     page.pubsub.subscribe_topic("tags_update", on_tags_changed)
     page.pubsub.subscribe_topic("playback_update", on_playback_update)
+
+    def on_server_status(topic, message):
+        """Сервер появился или пропал — гасим/включаем сегмент «Сервер»."""
+        online = message.get("online")
+        mode_explorer_status_button.disabled = not online
+        rebuild_queue_ui()
+        playlist_ui(page, playlist_list, play_btn, playlist_id)
+        if not online and explorer_view.data["mode"] == 1:
+            # сервер отвалился, пока мы были в его дереве — уводим в локальное
+            mode_explorer_status_button.selected_index = 0
+            explorer_view.data["mode"] = 0
+            open_dir(last_local_path or start_local_path)
+        try:
+            mode_explorer_status_button.update()
+        except (RuntimeError, AssertionError):
+            pass
+
+    page.pubsub.subscribe_topic("server_status", on_server_status)
+    # сегмент «Сервер» неактивен, пока первый ping не подтвердит доступность
+    mode_explorer_status_button.disabled = True
+    sources.start_server_watch(page)
 
     ui_utils.bg_ui_process(page, play_btn)
 

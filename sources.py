@@ -13,6 +13,7 @@ from tinytag import TinyTag
 import requests
 from requests.exceptions import RequestException
 import time
+import threading
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,22 @@ SRV_CACHING = config.getint('Server', 'network_caching', fallback=5000)
 
 class LocalSource:
     is_remote = False
+
+    def crumbs(self, uri):
+        """[(подпись, URI), ...] для хлебных крошек.
+        Путь C:/music/Rock даёт [("C:", "C:/"), ("music", "C:/music"), ("Rock", "C:/music/Rock")]"""
+        normalized = str(uri).replace("\\", "/")
+        segments = [s for s in normalized.split("/") if s]
+        is_windows = ":" in normalized
+
+        out = []
+        for i, segment in enumerate(segments):
+            if is_windows:
+                sub = segments[0] + "/" + "/".join(segments[1:i + 1])
+            else:
+                sub = "/" + "/".join(segments[:i + 1])
+            out.append((segment, str(Path(sub))))
+        return out
 
     def list_dir(self, folder_path: str):#анализ текущей папки (выбранной)
         path = Path(folder_path)
@@ -319,7 +336,37 @@ class RemoteSource:
     def __init__(self):
         self.session = requests.Session()
         self._cache = {}# track_id -> (когда_положили, данные)
-        self._ttl = 60 
+        self._ttl = 60
+
+    def ping(self, timeout=2.0):
+        """Состояние сервера или None, если не ответил.
+        Свой короткий таймаут: проверка доступности не должна ждать столько же,
+        сколько обычный запрос."""
+        saved, globals()["SRV_TIMEOUT"] = SRV_TIMEOUT, timeout
+        try:
+            return self._get("/server/ping").json()
+        except (RemoteUnavailable, RemoteNotFound, ValueError) as e:
+            logger.info(f"ping: сервер не ответил: {e}")
+            return None
+        finally:
+            globals()["SRV_TIMEOUT"] = saved
+
+    def crumbs(self, uri):
+        """[(подпись, URI), ...]. Первый сегмент — всегда корень сервера."""
+        try:
+            kind, rel = self._parse(uri)
+        except RemoteNotFound:
+            return [("Сервер", self._dir_uri(""))]
+        if kind == 't':
+            uri = self.parent(uri)
+            kind, rel = self._parse(uri)
+
+        out = [("Сервер", self._dir_uri(""))]
+        acc = []
+        for segment in [x for x in rel.split("/") if x]:
+            acc.append(segment)
+            out.append((segment, self._dir_uri("/".join(acc))))
+        return out
 
     # ---- кэш строк треков ----
     # rebuild_queue_ui спрашивает название/автора для каждой видимой строки при
@@ -524,6 +571,62 @@ class RemoteSource:
 
 LOCAL = LocalSource()
 REMOTE = RemoteSource()
+
+# ---- фоновый опрос сервера ----
+# Состояние живёт в модуле: любой код может спросить sources.server_online(),
+# не дожидаясь сети. Обновляет его отдельный поток.
+
+_srv_state = {"online": False, "info": None, "uuid": None, "uuid_changed": False}
+
+
+def server_online() -> bool:
+    """Отвечал ли сервер при последней проверке. Мгновенно, без сети."""
+    return _srv_state["online"]
+
+
+def server_info() -> dict | None:
+    """Последний ответ /server/ping или None."""
+    return _srv_state["info"]
+
+
+def start_server_watch(page, interval_online=60.0, interval_offline=15.0):
+    """Опрашивает сервер в фоне и шлёт 'server_status' в UI при смене состояния.
+
+    Вызывать ПОСЛЕ отрисовки окна: main.py синхронный, и проверка в пути
+    запуска задержала бы появление окна на таймаут TCP.
+    """
+    if not SRV_ENABLED:
+        logger.info("Сервер выключен в config.txt, фоновый опрос не запускается")
+        return
+
+    def run():
+        while True:
+            info = REMOTE.ping()
+            was = _srv_state["online"]
+            _srv_state["online"] = info is not None
+            _srv_state["info"] = info
+
+            if info:
+                uuid = info.get("library_uuid")
+                # Пересозданная library.db = другие id у тех же треков:
+                # srv://home/t/48213 в плейлисте начнёт играть другую песню
+                if _srv_state["uuid"] and uuid and uuid != _srv_state["uuid"]:
+                    _srv_state["uuid_changed"] = True
+                    logger.warning("library_uuid сервера изменился — библиотека пересоздана")
+                _srv_state["uuid"] = uuid
+
+            if was != _srv_state["online"]:
+                logger.info("Сервер %s", "доступен" if _srv_state["online"] else "не отвечает")
+                try:
+                    page.pubsub.send_all_on_topic("server_status", dict(_srv_state))
+                except RuntimeError:
+                    return   # сессия закрыта
+            # Недоступный сервер опрашиваем чаще: Pi, включённый после плеера,
+            # должен подхватиться сам, без перезапуска приложения
+            time.sleep(interval_online if _srv_state["online"] else interval_offline)
+
+    threading.Thread(target=run, daemon=True).start()
+
 
 def is_remote(uri) -> bool:
     return isinstance(uri, str) and uri.startswith("srv://")
