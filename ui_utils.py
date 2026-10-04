@@ -324,7 +324,10 @@ def add_queue(uri, insert_at): # <--- Добавили аргумент insert_a
                 tags = src.meta(track_uri)
                 name = tags["Название"]
                 author = tags.get("Автор") or "Неизвестно"
-                miniature = src.cover(track_uri, "50")
+                if src.is_remote:
+                    miniature = None
+                else:
+                    miniature = src.cover(track_uri, "50")
 
                 cursor.execute(
                     "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
@@ -374,7 +377,10 @@ def add_track_to_playlist(uri, playlist_id, insert_at=None):
             tags = src.meta(track_uri)
             name = tags["Название"]
             author = tags.get("Автор") or "Неизвестно"
-            miniature = src.cover(track_uri, "50") #TODO: перевести на файловую систему
+            if src.is_remote:
+                miniature = None
+            else:
+                miniature = src.cover(track_uri, "50") # TODO: перевести на файловую систему
 
             tracks_data.append({
                 "path": track_uri,
@@ -454,19 +460,10 @@ def add_playlist_to_queue(playlist_id, insert_at=None):
     if not tracks:
         return
 
-    queue_records = []
-    for track in tracks:
-        default_name, default_author, uri, cov_bytes = track
-
-        try:
-            src = sources.get(uri)
-            tags = src.meta(uri)
-            name = tags.get("Название") or default_name
-            author = tags.get("Автор") or default_author
-
-            queue_records.append((name, author, uri, cov_bytes))
-        except Exception as e:
-            logger.error(f"Ошибка обработки файла {uri}: {e}")
+    # Имя, автор и обложка уже лежат в app.db — перечитывать теги не нужно.
+    # Для серверных треков это сэкономило по HTTP-запросу на каждый трек плейлиста.
+    queue_records = [(name, author, uri, cov_bytes)
+                     for name, author, uri, cov_bytes in tracks]
 
     if not queue_records:
         return

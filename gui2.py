@@ -11,6 +11,7 @@ import math
 import sqlite3
 from contextlib import closing
 import time
+import cover_worker
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 
 import logging
@@ -800,7 +801,7 @@ def App(page: ft.Page):
             return
         ui_utils.load_track(page, path, play_btn, clicked_pos)
 
-    # Обработчик Drop (когда на ячейку очереди что-то бросают).
+    # Обработчик Drop (когда на ячейку очереди что-то бросают)
     # Определён один раз, а не на каждую ячейку: адресат берётся из e.control.data
     async def queue_on_accept(e):
         src_control = page.get_control(e.src_id) # Элемент, который тащим
@@ -981,8 +982,10 @@ def App(page: ft.Page):
         bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
 
         # Попытка декодировать обложку (если она есть)
-        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
-        if cov_bytes is not None:
+        if cov_bytes is None:
+            cover_worker.request_cover(path)
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+        else:
             cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
 
         item_content = ft.Container(
@@ -2174,6 +2177,7 @@ def App(page: ft.Page):
     # сегмент «Сервер» неактивен, пока первый ping не подтвердит доступность
     mode_explorer_status_button.disabled = True
     sources.start_server_watch(page)
+    cover_worker.start_cover_worker(page)
 
     ui_utils.bg_ui_process(page, play_btn)
 
