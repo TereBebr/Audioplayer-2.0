@@ -19,6 +19,7 @@ from mutagen.flac import FLACNoHeaderError
 import subprocess
 import logging
 import sources
+import queue_worker
 
 logger = logging.getLogger(__name__)
 
@@ -293,56 +294,7 @@ def play_next_or_pred(e, switch, play_btn_obj): #Если True, то следу�
         logger.info("В очереди нет треков для воспроизведения")
 
 def add_queue(uri, insert_at): # <--- Добавили аргумент insert_at
-    src = sources.get(uri)
-    # expand отдаёт плоский список URI треков; одиночный файл — список из одного
-    files_to_add = src.expand(uri) if src.is_dir(uri) else [uri]
-
-    if not files_to_add:
-        return
-
-    con_queue = sqlite3.connect('queue.db')
-    cursor = con_queue.cursor()
-    
-    try:
-        if insert_at is None:
-            # Обычное добавление в конец
-            cursor.execute("SELECT MAX(id) FROM queue")
-            max_id = cursor.fetchone()[0]
-            start_id = 0 if max_id is None else max_id + 1
-        else:
-            # Вставка по индексу: сдвигаем все элементы вниз на количество новых файлов
-            num_files = len(files_to_add)
-            cursor.execute("UPDATE queue SET id = id + ? WHERE id >= ?", (num_files, insert_at))
-            start_id = insert_at
-            
-        current_id = start_id
-        for track_uri in files_to_add:
-            try:
-                # источник берём для каждого трека: папка может быть локальной,
-                # а внутри — только локальные, но у RemoteSource это будет иначе
-                src = sources.get(track_uri)
-                tags = src.meta(track_uri)
-                name = tags["Название"]
-                author = tags.get("Автор") or "Неизвестно"
-                if src.is_remote:
-                    miniature = None
-                else:
-                    miniature = src.cover(track_uri, "50")
-
-                cursor.execute(
-                    "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                    (current_id, name, author, track_uri, miniature))
-                current_id += 1
-            except Exception as e:
-                logger.error(f"Ошибка чтения файла {track_uri}: {e}")
-        
-        con_queue.commit()
-    except Exception as e:
-        logger.error(f"Ошибка БД при добавлении в очередь: {e}")
-        con_queue.rollback()
-    finally:
-        con_queue.close()
-        logger.info(f"Добавлено {len(files_to_add)} файлов.")
+    queue_worker.request_track(uri, insert_at)
 
 def mix_queue(rebuild_queue):
     try:
