@@ -12,6 +12,7 @@ import sqlite3
 from contextlib import closing
 import time
 import cover_worker
+import queue_worker
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 
 import logging
@@ -1793,6 +1794,48 @@ def App(page: ft.Page):
             ft.Text("Сервер"),
         ],
     )
+
+    queue_progress_bar = ft.ProgressBar(width=200, visible=False, value=1)
+    queue_status_text = ft.Text(visible=False)
+
+    def on_queue_progress(topic, message):
+        status = message.get("status")
+        left = message.get("left")
+        processed = message.get("processed_session")
+
+        total = processed + left
+
+        if status == "loading":
+            queue_progress_bar.visible = True
+            queue_status_text.visible = True
+            
+            # Вычисляем прогресс от 0.0 до 1.0
+            queue_progress_bar.value = processed / total if total > 0 else 0
+            queue_status_text.value = f"({processed}/{total}) Загружено"
+
+        elif status == "done":
+            queue_progress_bar.value = 1.0
+            queue_status_text.value = f"Загружено треков: {processed}"
+
+        # Главное: воркер уже вписал треки в queue.db, но список об этом не знает.
+        # add_queue возвращается мгновенно (она только ставит заявку), поэтому
+        # rebuild_queue_ui() на месте вызова перерисовывает ещё пустую очередь.
+        rebuild_queue_ui()
+        try:
+            queue_progress_bar.update()
+            queue_status_text.update()
+        except (RuntimeError, AssertionError):
+            pass
+
+    _last_cover_rebuild = [0.0]
+
+    def on_cover_ready(topic, message):
+        """Обложка дотянулась. Перерисовываем список не чаще раза в 0.5 с,
+        но последнюю (left == 0) показываем обязательно."""
+        now = time.time()
+        if message.get("left", 0) == 0 or now - _last_cover_rebuild[0] >= 0.5:
+            _last_cover_rebuild[0] = now
+            rebuild_queue_ui()
     
     # Клавиши -------------------
 
@@ -1857,10 +1900,8 @@ def App(page: ft.Page):
                                 expand=1,
                                 content=ft.Row(
                                     controls=[
-                                        ft.Button(content="button1"),
-                                        ft.Button(content="button2"),
-                                        ft.Button(content="button3"),
-                                        ft.Button(content="button4", disabled=True),
+                                        queue_progress_bar,
+                                        queue_status_text
                                         ]
                                     )
                                 )
@@ -2157,6 +2198,14 @@ def App(page: ft.Page):
     page.pubsub.subscribe_topic("tags_update", on_tags_changed)
     page.pubsub.subscribe_topic("playback_update", on_playback_update)
 
+    page.pubsub.subscribe_topic("queue_progress", on_queue_progress)
+    page.pubsub.subscribe_topic("cover_ready", on_cover_ready)
+    def handle_disconnect(e):
+        page.pubsub.unsubscribe_topic("queue_progress", on_queue_progress)
+        page.pubsub.unsubscribe_topic("cover_ready", on_cover_ready)
+
+    page.on_disconnect = handle_disconnect
+
     def on_server_status(topic, message):
         """Сервер появился или пропал — гасим/включаем сегмент «Сервер»."""
         online = message.get("online")
@@ -2178,6 +2227,7 @@ def App(page: ft.Page):
     mode_explorer_status_button.disabled = True
     sources.start_server_watch(page)
     cover_worker.start_cover_worker(page)
+    queue_worker.start_queue_worker(page)
 
     ui_utils.bg_ui_process(page, play_btn)
 

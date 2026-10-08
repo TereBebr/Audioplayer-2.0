@@ -49,7 +49,11 @@ def start_cover_worker(page):
                             cursor = con_app.cursor()
                             cursor.execute("UPDATE tracks SET cov_bytes = ? WHERE path = ?", (miniature, uri))
 
-                        page.pubsub.send_all_on_topic("cover_ready", {"uri": uri, "cov": miniature})
+                        # left говорит UI, когда можно перерисовать список:
+                        # на каждой обложке делать это слишком дорого
+                        page.pubsub.send_all_on_topic(
+                            "cover_ready",
+                            {"uri": uri, "cov": miniature, "left": cover_queue.qsize()})
                     else:
                         # Сервер не отвечает — копить заявки бессмысленно, сливаем очередь
                         while not cover_queue.empty():
