@@ -73,6 +73,9 @@ def start_queue_worker(page):
                 try:
                     src = sources.get(track_uri)
                     tags = src.meta(track_uri)
+                    if tags.get("_stub"):
+                        logger.warning(f"Пропущен {track_uri}: мета недоступна")
+                        continue
                     name = tags["Название"]
                     author = tags.get("Автор") or "Неизвестно"
                     if src.is_remote:

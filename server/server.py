@@ -8,7 +8,7 @@ from config import load_config
 from importlib.metadata import version
 app = FastAPI()
 
-# fastapi dev desktop\server\server.py
+# fastapi dev server\server.py
 
 
 cfg = load_config()
@@ -73,7 +73,7 @@ def ping():
         }
     raise HTTPException(404)
 
-@app.get("/server/browse") # C:\Users\Dmitry\Desktop\server\music
+@app.get("/server/browse")
 def get_folder_content(folder_path: str):
     folder = safe_path(folder_path)
     if not folder.is_dir():

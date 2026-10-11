@@ -92,11 +92,11 @@ def change_color(e): #изменение цвета кнопки при наве
 #Функции проводника ----
 
 
-def on_item_click(e, rebuild_callback, play_btn_obj): #при клике на объект
+def on_item_click(e, open_dir, play_btn_obj): #при клике на объект
         uri = e.control.data
         src = sources.get(uri)
         if src.is_dir(uri):
-            rebuild_callback(src.list_dir(uri), uri)
+            open_dir(uri)
         else:
             tags = src.meta(uri)
             miniature = src.cover(uri, "50")
@@ -124,33 +124,33 @@ def open_file_folder(e, uri):
     except Exception as ex:
         logger.error(f"Не найдена директория {uri}: {ex}")
 
-def open_file_in_player_explorer(e, uri, rebuild_callback, explorer_mode):
+def open_file_in_player_explorer(e, uri, open_dir, explorer_mode):
     src = sources.get(uri)
     folder = uri if src.is_dir(uri) else src.parent(uri)
     if not src.is_dir(folder):
         logger.error(f"Не найдена директория {folder}")
         return
-    rebuild_callback(src.list_dir(folder), folder)
+    open_dir(folder)
     if src.is_remote:
         explorer_mode(1)
     else:
         explorer_mode(0)
 
 #строка пути
-def on_segment_click(e, target_path, rebuild_callback):
+def on_segment_click(e, target_path, open_dir):
     """Срабатывает при клике на сегмент (TextSpan) пути."""
     src = sources.get(target_path)
     if src.is_dir(target_path):
-        rebuild_callback(src.list_dir(target_path), target_path)
+        open_dir(target_path)
     else:
         logger.info(f"{target_path} не существует")
 
 
-def on_dialog_result(directory_path, rebuild_callback):
+def on_dialog_result(directory_path, open_dir):
     """Срабатывает, когда пользователь выбрал папку в системном окне (всегда локальная)."""
     src = sources.get(directory_path)
     if src.is_dir(directory_path):
-        rebuild_callback(src.list_dir(directory_path), directory_path)
+        open_dir(directory_path)
     else:
         logger.debug(f"Выбранная папка {directory_path} не существует или недоступна")
 
@@ -327,6 +327,11 @@ def add_track_to_playlist(uri, playlist_id, insert_at=None):
         try:
             src = sources.get(track_uri)
             tags = src.meta(track_uri)
+            if tags.get("_stub"):
+                # Настоящих тегов нет — записать заглушку в app.db значит оставить
+                # её там навсегда: плейлист будет вечно показывать «сервер недоступен»
+                logger.warning(f"Пропущен {track_uri}: мета недоступна")
+                continue
             name = tags["Название"]
             author = tags.get("Автор") or "Неизвестно"
             if src.is_remote:
@@ -639,4 +644,19 @@ def bg_ui_process(page: ft.Page, play_btn):
                         track_ended_handled = False
                 
             time.sleep(upd_time)
+    threading.Thread(target=run, daemon=True).start()
+
+def run_bg(fn, *args, on_done=None, on_error=None):
+    """Выполнить fn в фоне, результат отдать в on_done. Для одиночных запросов,
+    результат которых нужно показать, а не сохранить."""
+    def run():
+        try:
+            result = fn(*args)
+        except Exception as e:
+            logger.error(f"run_bg {fn.__name__}: {e}")
+            if on_error:
+                on_error(e)
+            return
+        if on_done:
+            on_done(result)
     threading.Thread(target=run, daemon=True).start()

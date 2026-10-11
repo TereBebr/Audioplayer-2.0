@@ -4,6 +4,8 @@ music/
 vlc_engine/
 gui.py
 *.db
+*.db-wal
+*.db-shm
 dist/
 build/
 *.spec
@@ -13,3 +15,4 @@ flet_client/
 server/covers/
 docs/server/uv.log
 server/library.db*
+docs/BACKLOG.md

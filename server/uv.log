@@ -1,6 +1,47 @@
-INFO:     Started server process [12852]
+INFO:     Started server process [27372]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): [winerror 10048] обычно разрешается только одно использование адреса сокета (протокол/сетевой адрес/порт)
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:54389 - "GET /server/ping HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/tracks_under?folder_path= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/1/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/2/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/3/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/4/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/5/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/6/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/7/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/8/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/9/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/10/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/11/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/12/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/13/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/14/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/15/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/16/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/17/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/64/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/65/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/66/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/67/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/68/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/69/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/70/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/71/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/72/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/track/73/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54389 - "GET /server/ping HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/74/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/75/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/76/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/53/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/54/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/55/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/56/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/57/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/58/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/59/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/60/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/61/cover?size=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54391 - "GET /server/track/62/cover?size=50 HTTP/1.1" 200 OK

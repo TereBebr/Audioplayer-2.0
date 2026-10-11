@@ -11,6 +11,7 @@ import math
 import sqlite3
 from contextlib import closing
 import time
+import threading
 import cover_worker
 import queue_worker
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
@@ -626,7 +627,7 @@ def App(page: ft.Page):
         explorer_tree.controls.append( #Верхняя кнопка
                 ft.GestureDetector(
                     data=src.parent(current_dir),
-                    on_double_tap=lambda e: ui_utils.on_item_click(e, rebuild_explorer, play_btn),
+                    on_double_tap=lambda e: ui_utils.on_item_click(e, open_dir, play_btn),
                     mouse_cursor=ft.MouseCursor.CLICK,
                     content=ft.Row([
                 ft.Icon(ft.Icons.ARROW_UPWARD, size=16, color="amber"),
@@ -662,7 +663,7 @@ def App(page: ft.Page):
                             ],
                         content=ft.GestureDetector(
                             data=item["path"],
-                            on_double_tap=lambda e: ui_utils.on_item_click(e, rebuild_explorer, play_btn),
+                            on_double_tap=lambda e: ui_utils.on_item_click(e, open_dir, play_btn),
                             mouse_cursor=ft.MouseCursor.CLICK,
                             content=ft.Row([
                                 ft.Icon(
@@ -699,7 +700,7 @@ def App(page: ft.Page):
                         size=text_size  # Синхронизируем с твоим конфигом
                     ),
                     # Замораживаем sub_uri через дефолтный аргумент лямбды
-                    on_click=lambda e, u=sub_uri: ui_utils.on_segment_click(e, u, rebuild_explorer)
+                    on_click=lambda e, u=sub_uri: ui_utils.on_segment_click(e, u, open_dir)
                 )
             )
             if i < len(segments) - 1:
@@ -1015,7 +1016,7 @@ def App(page: ft.Page):
                     ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
                     ft.PopupMenuItem(content=ft.Text("Удалить из очереди"), on_click=lambda e, uid=track_uid: delete_from_queue(e, uid)),
                     ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p), disabled=sources.is_remote(path)),
-                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
+                    ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, open_dir, set_explorer_mode)),
                 ]
             ),
             padding=queue_cell[4],
@@ -1143,7 +1144,7 @@ def App(page: ft.Page):
         root.destroy()
 
         if directory_path:
-            ui_utils.on_dialog_result(directory_path, rebuild_explorer)
+            ui_utils.on_dialog_result(directory_path, open_dir)
 
     address_bar = ft.Container(
         content=path_row,
@@ -1486,7 +1487,7 @@ def App(page: ft.Page):
                             ),
                         ),
                         ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=path: ui_utils.open_file_folder(e, p), disabled=sources.is_remote(path)),
-                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, rebuild_explorer, set_explorer_mode)),
+                        ft.PopupMenuItem(content=ft.Text("Открыть в файловой панели"), on_click=lambda e, p=path: ui_utils.open_file_in_player_explorer(e, p, open_dir, set_explorer_mode)),
                     ]
                 ),
                 content_when_dragging=ft.Container(
@@ -1717,6 +1718,16 @@ def App(page: ft.Page):
         visible=True
     )
 
+    explorer_loading = ft.Image(
+        src="assets/icons/loading_ico.png",
+        width=100,
+        height=100,
+        fit="contain",
+        visible=False,          # показываем только на время сетевого запроса
+        opacity=0.85,
+        animate_opacity=200,
+    )
+
     explorer_view = ft.Column(
         spacing=5,
         controls=[
@@ -1732,7 +1743,16 @@ def App(page: ft.Page):
                 ]
             ),
             search_bar, # Поиск
-            explorer_tree  # динамический проводник
+            # Stack кладёт индикатор ПОВЕРХ списка, не сдвигая его:
+            # alignment=center центрирует по обеим осям рабочей зоны
+            ft.Stack(
+                expand=True,
+                alignment=ft.Alignment.CENTER,
+                controls=[
+                    explorer_tree,          # динамический проводник
+                    explorer_loading,
+                ]
+            )
         ]
     )
 
@@ -1746,11 +1766,72 @@ def App(page: ft.Page):
         ),
     )
 
+    _pending_dir = [None]
+    _loading_timer = [None]
+    LOADING_DELAY = 0.5   # через сколько секунд ожидания показывать индикатор
+
+    def _cancel_loading_timer():
+        if _loading_timer[0] is not None:
+            _loading_timer[0].cancel()
+            _loading_timer[0] = None
+
+    def _set_loading(on: bool):
+        explorer_loading.visible = on
+        try:
+            explorer_loading.update()
+        except (RuntimeError, AssertionError):
+            pass   # контрол ещё не на странице
+
     def open_dir(uri):
         """Показать папку в проводнике. Единственный способ сменить содержимое:
         сначала спрашиваем у источника список, потом рисуем."""
         src = sources.get(uri)
-        rebuild_explorer(src.list_dir(uri), uri)
+        if not src.is_remote:
+            rebuild_explorer(src.list_dir(uri), uri)
+            return
+
+        _pending_dir[0] = uri
+        _cancel_loading_timer()
+
+        # Индикатор показываем не сразу: если сервер ответил за полсекунды,
+        # он только мигнёт и будет раздражать. Таймер срабатывает в своём потоке,
+        # поэтому показ идёт через pubsub, как и всё остальное.
+        timer = threading.Timer(
+            LOADING_DELAY,
+            lambda: page.pubsub.send_all_on_topic("dir_loading", {"uri": uri}))
+        timer.daemon = True
+        _loading_timer[0] = timer
+        timer.start()
+
+        # ВАЖНО: колбэки run_bg выполняются в фоновом потоке, а изменения контролов
+        # оттуда до клиента не доходят. Поэтому результат уходит через pubsub —
+        # его обработчик Flet выполняет у себя, и update() там работает.
+        # Так же сделано в bg_ui_process.
+        def done(items):
+            page.pubsub.send_all_on_topic("dir_ready", {"uri": uri, "items": items})
+
+        def failed(err):
+            page.pubsub.send_all_on_topic("dir_ready", {"uri": uri, "items": []})
+
+        ui_utils.run_bg(src.list_dir, uri, on_done=done, on_error=failed)
+
+    def on_dir_loading(topic, message):
+        """Прошло LOADING_DELAY, а ответа всё нет — показываем индикатор."""
+        if _pending_dir[0] == message["uri"]:
+            _set_loading(True)
+
+    def on_dir_ready(topic, message):
+        """Папка догрузилась. Выполняется на стороне Flet, отсюда UI обновлять можно."""
+        uri = message["uri"]
+        # Пользователь успел кликнуть другую папку — этот ответ уже не нужен
+        if _pending_dir[0] != uri:
+            return
+        _cancel_loading_timer()
+        _set_loading(False)
+        rebuild_explorer(message["items"], uri)
+
+    page.pubsub.subscribe_topic("dir_loading", on_dir_loading)
+    page.pubsub.subscribe_topic("dir_ready", on_dir_ready)
 
     def on_change_explorer_status(e):
         mode = e.control.selected_index
@@ -2203,6 +2284,8 @@ def App(page: ft.Page):
     def handle_disconnect(e):
         page.pubsub.unsubscribe_topic("queue_progress", on_queue_progress)
         page.pubsub.unsubscribe_topic("cover_ready", on_cover_ready)
+        page.pubsub.unsubscribe_topic("dir_ready", on_dir_ready)
+        page.pubsub.unsubscribe_topic("dir_loading", on_dir_loading)
 
     page.on_disconnect = handle_disconnect
 

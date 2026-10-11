@@ -471,11 +471,15 @@ class RemoteSource:
         try:
             _, track_id = self._parse(uri)
             row = self._track_row(track_id)
-        except (RemoteUnavailable, RemoteNotFound) as e:
+        except RemoteNotFound as e:
             logger.error(f"meta {uri}: {e}")
-            # Заглушка: строка в очереди останется читаемой, в БД не уедет None
-            return {"Название": f"Трек {track_id} (сервер недоступен)",
-                    "Автор": "Неизвестно", "Альбом": None, "Год": None, "Жанр": None}
+            # _stub = True говорит вызывающему: это не настоящие теги, в БД не писать
+            return {"Название": f"Трек {track_id} (нет на сервере)", "Автор": "Неизвестно",
+                    "Альбом": None, "Год": None, "Жанр": None, "_stub": True}
+        except RemoteUnavailable as e:
+            logger.error(f"meta {uri}: {e}")
+            return {"Название": f"Трек {track_id} (сервер недоступен)", "Автор": "Неизвестно",
+                    "Альбом": None, "Год": None, "Жанр": None, "_stub": True}
         return {
             "Название": row.get("name") or f"Трек {track_id}",
             "Автор":    row.get("author") or "Неизвестно",
