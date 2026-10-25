@@ -47,6 +47,23 @@ start_vol_val = config.getint('Main Settings', 'start_vol_val') # Начальн
 
 possible_covers = ["cover.jpg", "Cover.jpg", "cover.png", "folder.jpg"]
 
+# Устойчивость воспроизведения (Э7). Значения — в config.txt, секция [Server].
+# Паузы между повторами серверного трека, секунд; их число = число повторов
+RETRY_DELAYS = [float(x) for x in config.get('Server', 'retry_delays', fallback='1, 2, 4').split(',') if x.strip()]
+# Сколько треков подряд может не открыться, прежде чем плеер встанет на паузу
+MAX_FAIL_STREAK = config.getint('Server', 'max_fail_streak', fallback=3)
+CUT_MARGIN_MS = 3000     # Ended раньше конца больше чем на столько — это обрыв, а не конец
+STALL_SEC = 1.0          # время не идёт столько секунд при Playing — значит, буферизация
+# ...а столько — обрыв. VLC при пропавшем сервере не уходит в Error/Ended, а так и
+# остаётся в Playing с замершим временем — без этого порога ждал бы вечно
+STALL_FAIL_SEC = config.getfloat('Server', 'stall_timeout', fallback=10.0)
+SPINNER_DELAY = 0.5      # индикатор загрузки показываем не сразу, чтобы не мигал
+
+current_uri = None       # что сейчас загружено в плеер
+known_duration = 0       # длительность из меты источника, секунд (0 — неизвестна)
+track_gen = 0            # растёт при каждом load_track: фоновый цикл по нему видит смену трека
+failed_uris = set()      # треки, которые не удалось сыграть; в очереди рисуются серым
+
 #Работа с БД ----
 
 # Все соединения открываются через closing(), иначе sqlite3 не освобождает
@@ -220,11 +237,20 @@ def vol_slider_event(e, vol_label):
 
 def load_track(page, uri, play_btn_obj, idx): #через проводник
     global player, tags, details, tec_audio_info_num, curr_sec, total_sec, is_paused
+    global current_uri, known_duration, track_gen
     curr_sec = 0
     total_sec = 0
 
     src = sources.get(uri)
+    if src.is_remote and not sources.SRV_ENABLED:
+        # VLC сходил бы по http сам, мимо RemoteSource._get
+        logger.info(f"{uri}: сервер выключен в config.txt, трек не загружается")
+        page.pubsub.send_all_on_topic("player_notice", {"text": "Сервер выключен в настройках"})
+        return
     mrl = src.mrl(uri)
+    current_uri = uri
+    known_duration = src.duration(uri) or 0
+    track_gen += 1
 
     if player:
         player.stop()
@@ -574,75 +600,198 @@ def delete_track_from_queue(e, track_uid:int, play_btn_obj):
 #----
 
 import vlc
+def _advance_queue():
+    """Сдвинуть очередь на следующий трек (id 1 -> 0). Возвращает его путь или None.
+    Только БД, UI и VLC не трогает."""
+    try:
+        # closing() обязателен: без него соединение остаётся открытым
+        # на каждом автопереходе и WAL растёт всю сессию.
+        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
+            con_queue.execute("PRAGMA journal_mode=WAL;")
+            with con_queue: # транзакция
+                cursor = con_queue.cursor()
+                cursor.execute("SELECT path FROM queue WHERE id = 1")
+                r = cursor.fetchone()
+                if r:
+                    cursor.execute("UPDATE queue SET id = id - 1")
+                    return r[0]
+                # id = 1 нет — подтягиваем, если дальше что-то есть
+                cursor.execute("SELECT MAX(id) FROM queue")
+                max_id_row = cursor.fetchone()
+                if max_id_row and max_id_row[0] and max_id_row[0] > 0:
+                    cursor.execute("UPDATE queue SET id = id - 1 WHERE id > 1")
+    except Exception as ex:
+        logger.error(f"Ошибка при авто-переходе: {ex}")
+    return None
+
+
 def bg_ui_process(page: ft.Page, play_btn):
-    """Функция, которая будет крутиться в фоне и генерировать данные"""
+    """Фоновый цикл: позиция для слайдера, автопереход, поведение при плохой сети.
+
+    Состояния VLC:
+      Playing           — шлём позицию; если время стоит дольше STALL_SEC — буферизация
+      Opening/Buffering — индикатор загрузки (через SPINNER_DELAY)
+      Error             — повтор серверного трека (RETRY_DELAYS), потом пропуск
+      Ended             — у серверного трека раньше конца — обрыв, как Error; иначе следующий
+    MAX_FAIL_STREAK пропусков подряд — пауза и сообщение, дальше не листаем.
+    UI — только через pubsub: player_state, player_notice, playback_update."""
+
+    def send(topic, message):
+        page.pubsub.send_all_on_topic(topic, message)
+
     def run():
         global curr_sec, total_sec, is_paused
-        track_ended_handled = False
+        seen_gen = -1
+        ended_handled = False
+        retries = 0              # сколько повторов текущего трека уже было
+        retry_at = None          # когда делать следующий повтор (time.time())
+        pending_seek = None      # мс: после повтора вернуться сюда
+        last_pos = 0             # мс: последняя позиция, на которой трек реально играл
+        last_tick_pos = -1
+        stall_since = None
+        loading_since = None
+        played_ok = False
+        fail_streak = 0
+        spinner = False
+
+        def set_spinner(on):
+            nonlocal spinner
+            if on != spinner:
+                spinner = on
+                send("player_state", {"buffering": on})
+
+        def go_next():
+            global curr_sec, total_sec
+            path = _advance_queue()
+            if path:
+                curr_sec = total_sec = 0
+                load_track(page, path, play_btn, 1)
+                send("queue_advanced", 1)
+            return path
+
+        def track_failed(reason):
+            """Трек не играет: повторить (только серверный) или пропустить."""
+            global is_paused
+            nonlocal retries, retry_at, fail_streak
+            remote = sources.is_remote(current_uri)
+            # повторы — для коротких обрывов; если опрос уже знает, что сервера нет, ждать нечего
+            if remote and sources.server_online() and retries < len(RETRY_DELAYS):
+                delay = RETRY_DELAYS[retries]
+                retries += 1
+                retry_at = time.time() + delay
+                logger.warning(f"{current_uri}: {reason}; повтор {retries}/{len(RETRY_DELAYS)} через {delay} с")
+                send("player_notice", {"text": f"Связь потеряна, повтор {retries}/{len(RETRY_DELAYS)}"})
+                return
+
+            failed_uris.add(current_uri)
+            fail_streak += 1
+            retries, retry_at = 0, None
+            logger.error(f"{current_uri}: {reason}; пропущен (подряд: {fail_streak})")
+            if fail_streak >= MAX_FAIL_STREAK:
+                fail_streak = 0
+                player.stop()
+                is_paused = True
+                set_spinner(False)
+                send("player_state", {"stopped": True})
+                send("player_notice", {"text": "Сервер недоступен, воспроизведение остановлено" if remote
+                                       else "Треки не открываются, воспроизведение остановлено"})
+                return
+            send("player_notice", {"text": "Трек недоступен, пропущен"})
+            if not go_next():
+                set_spinner(False)
+                send("player_state", {"stopped": True})
+
         while True:
-            # Обязательно проверяем, создан ли плеер, чтобы поток не крашился при старте!
-            if player:
+            try:
+                # Обязательно проверяем, создан ли плеер, чтобы поток не крашился при старте!
+                if not player:
+                    time.sleep(upd_time)
+                    continue
+
+                now = time.time()
+                if track_gen != seen_gen:   # загружен другой трек — всё с нуля
+                    seen_gen = track_gen
+                    ended_handled = played_ok = False
+                    retries, retry_at, pending_seek = 0, None, None
+                    last_pos, last_tick_pos = 0, -1
+                    stall_since = loading_since = None
+
                 state = player.get_state()
-                # print(state)
-                # Если плеер играет и ползунок не перетаскивают
-                if player.is_playing() and not is_dragging:
-                    curr_sec = player.get_time() // 1000
-                    total_length = player.get_length() # VLC возвращает миллисекунды, иногда -1 при ошибке
-                    total_sec = total_length // 1000 if total_length > 0 else 0
-                    
-                    # Отправляем словарь с данными в UI-файл в топик "playback_update"
-                    try:
-                        page.pubsub.send_all_on_topic("playback_update", {
-                            "curr_sec": curr_sec,
-                            "total_sec": total_sec
-                        })
-                    except RuntimeError:
-                        break #Сессия закрыта
-                    track_ended_handled = False
-                
-                # Если трек закончился
-                # elif not player.is_playing() and not is_paused and total_sec > 0 and curr_sec >= (total_sec - 1):
-                elif state == vlc.State.Ended and not track_ended_handled:
-                    track_ended_handled = True
-                    r = None
 
-                    try:
-                        # 1. Открываем соединение с таймаутом ожидания блокировки.
-                        # closing() обязателен: без него соединение остаётся открытым
-                        # на каждом автопереходе и WAL растёт всю сессию.
-                        with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
-                            con_queue.execute("PRAGMA journal_mode=WAL;")
-                            with con_queue: # транзакция
-                                cursor = con_queue.cursor()
+                if retry_at is not None:
+                    set_spinner(True)
+                    if now >= retry_at:
+                        retry_at = None
+                        pending_seek = last_pos or None
+                        ended_handled = False
+                        player.set_mrl(sources.get(current_uri).mrl(current_uri))
+                        player.play()
 
-                                # 2. Получаем текущий трек
-                                cursor.execute("SELECT path FROM queue WHERE id = 1")
-                                r = cursor.fetchone()
+                elif state == vlc.State.Playing:
+                    loading_since = None
+                    pos = player.get_time()
+                    if pending_seek:
+                        player.set_time(pending_seek)   # продолжить с места обрыва
+                        pending_seek = None
+                    if pos != last_tick_pos:
+                        last_tick_pos, stall_since = pos, None
+                        set_spinner(False)
+                    else:
+                        stall_since = stall_since or now
+                        if now - stall_since > STALL_SEC:
+                            set_spinner(True)
+                        if now - stall_since > STALL_FAIL_SEC:
+                            stall_since = None
+                            player.stop()
+                            track_failed(f"поток встал на {max(pos, 0) // 1000} с")
+                            time.sleep(upd_time)
+                            continue
+                    if pos > 0:
+                        last_pos = pos
+                    if pos > 2000 and not played_ok:   # трек точно пошёл
+                        played_ok = True
+                        fail_streak = 0
+                        failed_uris.discard(current_uri)
 
-                                if r:
-                                    # Сдвигаем очередь
-                                    cursor.execute("UPDATE queue SET id = id - 1")
-                                else:
-                                    # Если id = 1 не найден, проверяем, есть ли другие треки
-                                    cursor.execute("SELECT MAX(id) FROM queue")
-                                    max_id_row = cursor.fetchone()
+                    if not is_dragging:
+                        curr_sec = max(pos, 0) // 1000
+                        # для сетевого потока get_length() первые секунды = -1:
+                        # пока так, длительность берём из меты источника
+                        total_length = player.get_length()
+                        total_sec = total_length // 1000 if total_length > 0 else int(known_duration)
+                        send("playback_update", {"curr_sec": curr_sec, "total_sec": total_sec})
+                    ended_handled = False
 
-                                    if max_id_row and max_id_row[0] and max_id_row[0] > 0:
-                                        cursor.execute("UPDATE queue SET id = id - 1 WHERE id > 1")
+                elif state in (vlc.State.Opening, vlc.State.Buffering):
+                    loading_since = loading_since or now
+                    if now - loading_since > SPINNER_DELAY:
+                        set_spinner(True)
 
-                    except Exception as ex:
-                        logger.error(f"Ошибка при авто-переходе: {ex}")
-                        r = None
+                elif state == vlc.State.Error and not ended_handled:
+                    ended_handled = True
+                    track_failed("VLC: ошибка открытия или чтения")
 
-                    # 3. Работа с интерфейсом/VLC происходит ПОСЛЕ закрытия соединения с БД
-                    if r:
-                        real_path = r[0]
-                        curr_sec = 0
-                        total_sec = 0
-                        load_track(page, real_path, play_btn, 1)
-                        page.pubsub.send_all_on_topic("queue_advanced", 1)
-                        track_ended_handled = False
-                
+                elif state == vlc.State.Ended and not ended_handled:
+                    ended_handled = True
+                    set_spinner(False)
+                    length_ms = int(known_duration * 1000) or max(player.get_length(), 0)
+                    if last_pos == 0:
+                        # так и не заиграл: VLC иногда отдаёт Ended вместо Error
+                        track_failed("не открылся")
+                    elif sources.is_remote(current_uri) and length_ms and last_pos < length_ms - CUT_MARGIN_MS:
+                        track_failed(f"обрыв на {last_pos // 1000} с из {length_ms // 1000}")
+                    else:
+                        go_next()
+
+                elif state in (vlc.State.Paused, vlc.State.Stopped, vlc.State.NothingSpecial):
+                    loading_since = stall_since = None
+                    set_spinner(False)
+
+            except RuntimeError:
+                break   # сессия Flet закрыта — pubsub больше некуда слать
+            except Exception as ex:
+                # поток не должен умирать молча: без него встанут слайдер и автопереход
+                logger.exception(f"bg_ui_process: {ex}")
             time.sleep(upd_time)
     threading.Thread(target=run, daemon=True).start()
 

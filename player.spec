@@ -11,7 +11,8 @@ hiddenimports += h
 
 # flet_desktop нужен как python-модуль; сам клиент Flet кладётся рядом с .exe
 # в папку flet_client (см. build.ps1) и подключается через FLET_VIEW_PATH.
-hiddenimports += ["flet_desktop", "vlc", "app_env", "database", "utils", "ui_utils", "gui2"]
+hiddenimports += ["flet_desktop", "vlc", "app_env", "database", "utils", "ui_utils", "gui2",
+                  "sources", "cover_worker", "queue_worker", "requests", "search_rank"]
 
 a = Analysis(
     ["main.py"],

@@ -9,6 +9,7 @@ import logging
 import sqlite3
 import uuid
 from pathlib import Path
+import search_rank
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,10 @@ def get_conn(db_path: Path | str) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA synchronous = NORMAL")   # в WAL это безопасно и заметно быстрее на SD/HDD
     con.execute("PRAGMA foreign_keys = ON")
+
+    # для поиска: регистр и ё не важны для любого алфавита, LIKE сам так умеет только с ASCII
+    con.create_function("py_fold", 1, search_rank.fold, deterministic=True)
+    con.create_function("py_rank", 3, search_rank.rank, deterministic=True)
     return con
 
 
@@ -144,18 +149,28 @@ def tracks_under_dir(con: sqlite3.Connection, rel_dir: str) -> list[sqlite3.Row]
         (rel_dir, len(prefix), prefix),
     ).fetchall()
 
-
-def search_tracks(con: sqlite3.Connection, query: str, limit: int = 200) -> list[sqlite3.Row]:
+def search_tracks(con: sqlite3.Connection, query: str, limit: int = 200, rel_dir: str = "") -> list[sqlite3.Row]:
+    """Подстрока в тегах или пути, без учёта регистра (py_fold из get_conn).
+    rel_dir пустой — вся библиотека, иначе только эта папка и её подпапки."""
     q = query.strip()
     if not q:
         return []
     # LIKE-подстановки в пользовательском запросе экранируем сами
-    esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    pat = f"%{esc}%"
+    esc = search_rank.fold(q).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    # теги и путь склеены в одну строку: py_fold вызывается один раз на трек, а не четыре
+    where = ("missing = 0 AND py_fold(coalesce(name, '') || ' ' || coalesce(author, '') || ' ' || "
+             "coalesce(album, '') || ' ' || rel_path) LIKE ? ESCAPE '\\'")
+    params = [f"%{esc}%"]
+    if rel_dir:
+        # то же условие, что в tracks_under_dir: сама папка или всё, что начинается с "папка/"
+        prefix = rel_dir + "/"
+        where += " AND (dir = ? OR substr(dir, 1, ?) = ?)"
+        params += [rel_dir, len(prefix), prefix]
+    # сначала по рангу (см. search_rank.py), внутри ранга — по исполнителю и альбому
+    params += [q, limit]
     return con.execute(
-        "SELECT * FROM tracks "
-        "WHERE missing = 0 AND (name LIKE ? ESCAPE '\\' OR author LIKE ? ESCAPE '\\' "
-        "OR album LIKE ? ESCAPE '\\') "
-        "ORDER BY author COLLATE NOCASE, album COLLATE NOCASE, name COLLATE NOCASE LIMIT ?",
-        (pat, pat, pat, limit),
+        f"SELECT * FROM tracks WHERE {where} "
+        "ORDER BY py_rank(?, name, author), author COLLATE NOCASE, album COLLATE NOCASE, rel_path "
+        "LIMIT ?",
+        params,
     ).fetchall()

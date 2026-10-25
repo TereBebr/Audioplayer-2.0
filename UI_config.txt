@@ -89,6 +89,28 @@ search_barBorderOp = 0.4
 ; Сила скругления углов строки поиска, по стандарту 8
 search_bar_radius = 8
 
+; --- Кнопка «В папке / Везде» справа от строки поиска ---
+
+; Ширина и высота кнопки, по стандарту 16 и 10
+search_scopeWidth = 16
+search_scopeHeight = 10
+
+; На сколько пикселей поднять кнопку над центром строки поиска, по стандарту 3
+search_scopeLift = 3
+
+; Размер и цвет иконки, по стандарту 9 и amber
+search_scopeIconSize = 9
+search_scopeIconCol = amber
+
+; Фон и рамка кнопки. По стандарту как у строки поиска
+search_scopeBGCol = #3c3e40
+search_scopeBGOp = 0.9
+search_scopeBorderCol = #ededed
+search_scopeBorderOp = 0.4
+
+; Скругление углов кнопки, по стандарту 8
+search_scopeRadius = 8
+
 [UI queue_bar] ; настройка размера и цвета ячеек очереди
 
 ; Скругление ячейки (целое число). по стандарту 8

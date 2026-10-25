@@ -11,6 +11,7 @@ import io
 import utils
 from tinytag import TinyTag
 import requests
+import search_rank
 from requests.exceptions import RequestException
 import time
 import threading
@@ -273,6 +274,11 @@ class LocalSource:
         else: tags = self.tt_lite_parse(uri)
         return tags
 
+    def duration(self, uri):
+        """Длительность в секундах или None. Для локального файла VLC знает длину сразу,
+        поэтому подсказка не нужна."""
+        return None
+
     def details(self, uri):
         uri = Path(uri)
         try:
@@ -324,6 +330,42 @@ class LocalSource:
                 details["Глубина бит"] = bits
         return details
 
+    WALK_TTL = 60.0       # сколько секунд держать список файлов библиотеки
+    SEARCH_LIMIT = 200    # как на сервере
+    _walk_cache = {}      # root -> (время, [(имя файла, полный путь, путь от root для поиска)])
+
+    def _walk(self, root):
+        """Все треки под root, с подпапками. Поиск идёт на каждую паузу в наборе,
+        а обход диска медленный — поэтому список кэшируется на WALK_TTL."""
+        hit = self._walk_cache.get(root)
+        if hit and time.time() - hit[0] < self.WALK_TTL:
+            return hit[1]
+        files = []
+        for dirpath, _, filenames in os.walk(root):   # папки без доступа os.walk пропускает сам
+            for fn in filenames:
+                if os.path.splitext(fn)[1].lower() in SUPPORTED_FORMATS:
+                    full = os.path.join(dirpath, fn)
+                    files.append((fn, full, _fold(os.path.relpath(full, root))))
+        self._walk_cache[root] = (time.time(), files)
+        return files
+
+    def search(self, query: str, folder_uri: str | None = None, items: list | None = None) -> list | None:
+        """items задан — фильтр по уже открытой папке, без диска.
+        Иначе — обход folder_uri со всеми подпапками (поиск по библиотеке), только треки;
+        совпадение ищется в пути от folder_uri, т.е. и по имени файла, и по папкам."""
+        q = _fold(query.strip())
+        if items is not None:
+            found = [{"name": item["name"], "path": item["path"], "type": item["type"]} for item in items if q in _fold(item["name"])]
+            # тот же порядок, что на сервере (search_rank.py); sorted устойчивый, поэтому
+            # внутри ранга остаётся порядок list_dir: папки, потом файлы, по алфавиту
+            return sorted(found, key=lambda item: search_rank.rank(query, item["name"]))
+        if not q or not folder_uri:
+            return []
+        found = [{"name": name, "path": full, "type": "track"}
+                 for name, full, rel in self._walk(folder_uri) if q in rel]
+        found.sort(key=lambda item: (search_rank.rank(query, item["name"]), item["path"].casefold()))
+        return found[:self.SEARCH_LIMIT]
+
 class RemoteUnavailable(Exception):
     """Сервер недоступен или произошла сетевая ошибка."""
     pass
@@ -344,7 +386,7 @@ class RemoteSource:
         сколько обычный запрос."""
         saved, globals()["SRV_TIMEOUT"] = SRV_TIMEOUT, timeout
         try:
-            return self._get("/server/ping").json()
+            return self._get("/server/ping", probe=True).json()
         except (RemoteUnavailable, RemoteNotFound, ValueError) as e:
             logger.info(f"ping: сервер не ответил: {e}")
             return None
@@ -418,13 +460,22 @@ class RemoteSource:
             return f"srv://{SRV_ID}/d/{rel_path}"
         return f"srv://{SRV_ID}/d"
 
-    def _get(self, path, params=None, stream=False):
+    def _get(self, path, params=None, stream=False, probe=False):
         url = f"{SRV_BASE_URL}{path}"
+        if not SRV_ENABLED:
+            # единственная точка выхода в сеть: при enabled = False не уходит ни один запрос
+            raise RemoteUnavailable("сервер выключен в config.txt")
+        if not probe and not _srv_state["online"]:
+            # фоновый опрос уже знает, что сервера нет: не ждём таймаут на каждом запросе.
+            # Сам опрос (ping) идёт с probe=True — иначе он не узнал бы, что сервер вернулся
+            raise RemoteUnavailable("сервер недоступен (по последнему опросу)")
         headers = {"Authorization": f"Bearer {SRV_TOKEN}"} if SRV_TOKEN else {}
         try:
             r = self.session.get(url, params=params, headers=headers,
                                 stream=stream, timeout=SRV_TIMEOUT)
         except RequestException as err:
+            if not probe:
+                _wake.set()   # пусть опрос проверит сервер прямо сейчас
             raise RemoteUnavailable(f"Сервер недоступен [{url}]: {err}") from err
         if r.status_code in (404, 410):
             raise RemoteNotFound(f"{url} -> {r.status_code}")
@@ -487,6 +538,16 @@ class RemoteSource:
             "Год":      row.get("year"),
             "Жанр":     row.get("genre"),
         }
+
+    def duration(self, uri):
+        """Длительность в секундах из индекса сервера, None — неизвестно. Нужна слайдеру:
+        для сетевого потока VLC первые секунды отдаёт get_length() = -1."""
+        try:
+            _, track_id = self._parse(uri)
+            return self._track_row(track_id).get("duration")
+        except (RemoteUnavailable, RemoteNotFound) as e:
+            logger.error(f"duration {uri}: {e}")
+            return None
 
     def details(self, uri):
         """Формат строк — как у LocalSource.details, иначе разница видна в UI.
@@ -572,6 +633,23 @@ class RemoteSource:
         rel = rel.strip('/')
         return f"Сервер/{rel}" if rel else "Сервер"
 
+    def search(self, query: str, folder_uri: str | None = None, items: list | None = None) -> list | None:
+        """Функция активного поиска"""   
+        if not query.strip():
+            return []
+        try:
+            rel = ""
+            if folder_uri:
+                _, rel = self._parse(folder_uri)
+            rows = self._get("/server/search", params={"q": query, "folder_path": rel}).json()
+        except RemoteUnavailable as e:
+            logger.error(f"search {query!r}: {e}")
+            return None
+        except RemoteNotFound as e:
+            logger.error(f"search {query!r} в {folder_uri}: {e}")
+            return []
+        self._prime(rows)
+        return [{"name": f"{row['author']} — {row['name']}" if row.get("author") else row["name"], "path": self._track_uri(row["id"]), "type": "track"} for row in rows]
 
 LOCAL = LocalSource()
 REMOTE = RemoteSource()
@@ -581,17 +659,18 @@ REMOTE = RemoteSource()
 # не дожидаясь сети. Обновляет его отдельный поток.
 
 _srv_state = {"online": False, "info": None, "uuid": None, "uuid_changed": False}
-
+# Будит фоновый опрос раньше срока. Ставит _get, когда запрос не дошёл до сервера:
+# иначе при доступном сервере о его пропаже узнали бы только через interval_online (60 с),
+# и всё это время проводник пускал бы в «Сервер» и ждал таймаут на каждом клике
+_wake = threading.Event()
 
 def server_online() -> bool:
     """Отвечал ли сервер при последней проверке. Мгновенно, без сети."""
     return _srv_state["online"]
 
-
 def server_info() -> dict | None:
     """Последний ответ /server/ping или None."""
     return _srv_state["info"]
-
 
 def start_server_watch(page, interval_online=60.0, interval_offline=15.0):
     """Опрашивает сервер в фоне и шлёт 'server_status' в UI при смене состояния.
@@ -627,13 +706,16 @@ def start_server_watch(page, interval_online=60.0, interval_offline=15.0):
                     return   # сессия закрыта
             # Недоступный сервер опрашиваем чаще: Pi, включённый после плеера,
             # должен подхватиться сам, без перезапуска приложения
-            time.sleep(interval_online if _srv_state["online"] else interval_offline)
+            # _wake прерывает ожидание, если запрос из приложения не дошёл до сервера
+            _wake.wait(interval_online if _srv_state["online"] else interval_offline)
+            _wake.clear()
 
     threading.Thread(target=run, daemon=True).start()
-
 
 def is_remote(uri) -> bool:
     return isinstance(uri, str) and uri.startswith("srv://")
 
 def get(uri):
     return REMOTE if is_remote(uri) else LOCAL
+
+_fold = search_rank.fold   # регистр и ё не важны — так же, как на сервере

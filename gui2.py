@@ -29,6 +29,11 @@ config.read('config.txt', encoding='utf-8')
 start_vol_val = config.getint('Main Settings', 'start_vol_val')
 max_histlen = (config.getint('Main Settings', 'max_histlen') * -1) # Максимальная длина истории проигранных треков
 p = config.get('Main Settings', 'start_path', fallback='./music') # Начальная папка
+if sources.is_remote(p):
+    # список папки читается здесь, до появления окна: с сервером это ожидание сети при старте.
+    # Серверная стартовая папка — отдельно, start_server_path
+    logger.warning(f"start_path = {p}: должен быть локальным, беру ./music")
+    p = './music'
 folder_items = sources.get(p).list_dir(p) # содержимое начальной папки
 # =================
 
@@ -69,6 +74,18 @@ search_barBGOp = config.getfloat('UI search_bar','search_barBGOp') # Прозр�
 search_barBorderCol = config.get('UI search_bar','search_barBorderCol') # Цвет рамки (обводки) строки поиска
 search_barBorderOp = config.getfloat('UI search_bar','search_barBorderOp') # Прозрачность рамки строки поиска
 search_bar_radius = config.getint('UI search_bar','search_bar_radius') # Сила скругления углов строки поиска
+#Конфиги search_scope (кнопка «В папке / Везде» справа от строки поиска) ==========
+# fallback — чтобы старый ui_config.txt без этих ключей давал тот же вид
+search_scopeWidth = config.getint('UI search_bar', 'search_scopeWidth', fallback=16) # Ширина кнопки
+search_scopeHeight = config.getint('UI search_bar', 'search_scopeHeight', fallback=10) # Высота кнопки
+search_scopeLift = config.getint('UI search_bar', 'search_scopeLift', fallback=3) # Насколько поднять кнопку над центром строки поиска
+search_scopeIconSize = config.getint('UI search_bar', 'search_scopeIconSize', fallback=9) # Размер иконки
+search_scopeIconCol = config.get('UI search_bar', 'search_scopeIconCol', fallback='amber') # Цвет иконки
+search_scopeBGCol = config.get('UI search_bar', 'search_scopeBGCol', fallback=search_barBGCol) # Цвет фона кнопки
+search_scopeBGOp = config.getfloat('UI search_bar', 'search_scopeBGOp', fallback=search_barBGOp) # Прозрачность фона кнопки
+search_scopeBorderCol = config.get('UI search_bar', 'search_scopeBorderCol', fallback=search_barBorderCol) # Цвет рамки кнопки
+search_scopeBorderOp = config.getfloat('UI search_bar', 'search_scopeBorderOp', fallback=search_barBorderOp) # Прозрачность рамки кнопки
+search_scopeRadius = config.getint('UI search_bar', 'search_scopeRadius', fallback=search_bar_radius) # Скругление углов кнопки
 # ==== queue_cell presets: ===
 # (размер обложки, размер названия, размер автора, расстояние между ними, отступы внутри ячейки, высота ячейки)
 queue_border_radius = config.getint('UI queue_bar','queue_border_radius')
@@ -146,11 +163,11 @@ if pause_key in ("space", "Space"): pause_key = " "
 second_pause_key = config.get('Hotkeys', 'second_pause_key')
 
 next_key = config.get('Hotkeys', 'next_key')
-if next_key in ("space", "Space"): pause_key = " "
+if next_key in ("space", "Space"): next_key = " "
 second_next_key = config.get('Hotkeys', 'second_next_key')
 
 previous_key = config.get('Hotkeys', 'previous_key')
-if previous_key in ("space", "Space"): pause_key = " "
+if previous_key in ("space", "Space"): previous_key = " "
 second_previous_key = config.get('Hotkeys', 'second_previous_key')
 # ================================
 
@@ -344,6 +361,19 @@ class VirtualList:
 
 def App(page: ft.Page):
     page.title = "App"
+
+    # Пока курсор в текстовом поле, пробел и стрелки — это ввод, а не хоткеи плеера.
+    # Каждое ft.TextField регистрируется через typing_field().
+    _typing = set()
+
+    def typing_field(field: ft.TextField) -> ft.TextField:
+        def on_focus(e):
+            _typing.add(id(field))
+        def on_blur(e):
+            _typing.discard(id(field))
+        field.on_focus = on_focus
+        field.on_blur = on_blur
+        return field
     page.assets_dir = "assets"
 
     explorer_tree = ft.ListView(
@@ -357,6 +387,29 @@ def App(page: ft.Page):
     height=45,         
     fit="contain",
     )
+    # Показывается ВМЕСТО play_btn, пока сетевой трек подгружается (Э7).
+    # Переключает on_player_state по сигналу из bg_ui_process.
+    # Вращение — анимацией Flet: каждую секунду поворачиваем ещё на оборот,
+    # animate_rotation плавно доводит. Крутит spin_logo(), пока spinner виден.
+    play_spinner = ft.Image(
+        src="assets/icons/loading_ico.png",
+        width=45,
+        height=45,
+        fit="contain",
+        rotate=ft.Rotate(0, alignment=ft.Alignment.CENTER),
+        animate_rotation=ft.Animation(1000, ft.AnimationCurve.LINEAR),
+        visible=False,
+    )
+    _spinning = [False]
+
+    async def spin_logo():
+        while _spinning[0]:
+            play_spinner.rotate.angle += 2 * math.pi
+            try:
+                play_spinner.update()
+            except (RuntimeError, AssertionError):
+                break
+            await asyncio.sleep(1)
 
     async def on_files_dropped(path, insert_at):
         # path = e.path
@@ -507,8 +560,8 @@ def App(page: ft.Page):
                     logger.error(f"Ошибка создания плейлиста: {er}")
                     return None
 
-            name_input = ft.TextField(label="Название плейлиста", expand=True)
-            cover_input = ft.TextField(label="Путь к картинке (опционально)", expand=True)
+            name_input = typing_field(ft.TextField(label="Название плейлиста", expand=True))
+            cover_input = typing_field(ft.TextField(label="Путь к картинке (опционально)", expand=True))
             
             # Создаем диалог
             dlg = ft.AlertDialog(
@@ -569,8 +622,8 @@ def App(page: ft.Page):
                 return False
 
         # value, а не label: label это только подсказка, поле оставалось пустым
-        name_input = ft.TextField(label="Название плейлиста", value=pl_name, expand=True)
-        cover_input = ft.TextField(label="Путь к картинке (опционально)", value=pl_cover_path or "", expand=True)
+        name_input = typing_field(ft.TextField(label="Название плейлиста", value=pl_name, expand=True))
+        cover_input = typing_field(ft.TextField(label="Путь к картинке (опционально)", value=pl_cover_path or "", expand=True))
         
         # Создаем диалог
         dlg = ft.AlertDialog(
@@ -596,15 +649,18 @@ def App(page: ft.Page):
         open_dialog(page, dlg)
 
     # Динамический проводник
-    def rebuild_explorer(items, current_dir, is_search=False):
+    def rebuild_explorer(items, current_dir, is_search=False, empty_text=None):
         global last_local_path, last_server_path
         if not is_search:
             explorer_tree.all_items = items
             explorer_tree.current_dir = current_dir
-            # Очищаем поле поиска при переходе в новую папку
+            # Переход в папку сбрасывает поиск: поле очищаем, а запоздавший
+            # ответ сервера не должен нарисоваться поверх открытой папки
+            _cancel_search()
             if search_input.value != "":
                 search_input.value = ""
                 search_input.update()
+            _sync_scope_btn(current_dir)
 
         explorer_tree.controls.clear()
         # current_dir — это URI (строка). Всё, что нужно знать о нём, спрашиваем у источника:
@@ -637,7 +693,8 @@ def App(page: ft.Page):
         )
 
         if not items: # Если папка пустая или поиск ничего не нашел
-            empty_text = "Ничего не найдено" if is_search else "Папка пуста"
+            if empty_text is None:
+                empty_text = "Ничего не найдено" if is_search else "Папка пуста"
             explorer_tree.controls.append(
                 ft.Container(
                     content=ft.Text(empty_text, size=12, color="gray", italic=True),
@@ -977,7 +1034,8 @@ def App(page: ft.Page):
     def build_queue_cell(index, row):
         track_id, track_uid, name, author, path, cov_bytes = row
 
-        unavailable = sources.is_remote(path) and not sources.server_online()
+        # сервер выключен или трек не удалось сыграть (Э7) — рисуем серым
+        unavailable = (sources.is_remote(path) and not sources.server_online()) or path in ui_utils.failed_uris
         # 1. Визуальное оформление играющего трека (id == 0)
         is_playing = (track_id == 0)
         border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
@@ -1156,32 +1214,101 @@ def App(page: ft.Page):
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
     )
 
-    def perform_search(e):
-        """Функция активного поиска"""
-        query = e.control.value.lower().strip()
+    _search_timer = [None]
+    _search_seq = [0]     # номер последнего запроса: ответы на старые выбрасываются
+    SEARCH_DELAY = 0.3    # debounce — пауза в наборе, после которой запрос уходит на сервер
+    MIN_QUERY_LEN = 2     # один символ на сервере совпадает почти со всем
+    # область поиска своя у каждого режима: локально по умолчанию — как было, по папке
+    _search_scope = {"local": "folder", "server": "all"}
 
+    def _cancel_search():
+        """Отменить отложенный запрос и сделать недействительными уже ушедшие."""
+        _search_seq[0] += 1
+        if _search_timer[0] is not None:
+            _search_timer[0].cancel()
+            _search_timer[0] = None
+
+    def _bg_search(src, query, folder_uri, seq):
+        """Выполняется в потоке таймера. UI отсюда не трогаем — только pubsub."""
+        def done(items):
+            page.pubsub.send_all_on_topic("search_ready", {"seq": seq, "items": items})
+        ui_utils.run_bg(src.search, query, folder_uri,
+                        on_done=done, on_error=lambda err: done(None))
+
+    def _mode_of(uri):
+        return "server" if sources.get(uri).is_remote else "local"
+
+    def perform_search(e=None, immediate=False):
+        """Локально «в папке» — фильтр открытой папки, сразу. Остальное (сервер, вся
+        локальная библиотека) — в фоне после паузы в наборе; результат — в on_search_ready."""
+        query = search_input.value.strip()
         all_items = getattr(explorer_tree, "all_items", [])
         current_dir = getattr(explorer_tree, "current_dir", "")
-        
-        if not query:
-            # Если поиск пуст, показываем все элементы
-            filtered_items = all_items
-        else:
-            filtered_items = [
-                item for item in all_items 
-                if query in item["name"].lower()
-            ]
-        rebuild_explorer(filtered_items, current_dir, is_search=bool(query))
+        src = sources.get(current_dir)
+        mode = _mode_of(current_dir)
+        scope = _search_scope[mode]
 
-    search_input = ft.TextField(
+        _cancel_search()
+        if mode == "local" and scope == "folder":
+            rebuild_explorer(src.search(query, items=all_items), current_dir, is_search=bool(query))
+            return
+        if len(query) < MIN_QUERY_LEN:
+            rebuild_explorer(all_items, current_dir, is_search=bool(query))
+            return
+
+        if mode == "server":
+            folder = current_dir if scope == "folder" else None   # None — вся библиотека на Pi
+        else:
+            folder = start_local_path                             # корень локальной библиотеки
+        timer = threading.Timer(0 if immediate else SEARCH_DELAY,
+                                _bg_search, args=(src, query, folder, _search_seq[0]))
+        timer.daemon = True
+        _search_timer[0] = timer
+        timer.start()
+
+    def on_search_ready(topic, message):
+        """Ответ фонового поиска. Выполняется на стороне Flet, отсюда UI обновлять можно."""
+        if message["seq"] != _search_seq[0]:
+            return   # пользователь успел изменить запрос или уйти в другую папку
+        current_dir = getattr(explorer_tree, "current_dir", "")
+        if message["items"] is None:
+            rebuild_explorer([], current_dir, is_search=True, empty_text="Сервер недоступен")
+        else:
+            rebuild_explorer(message["items"], current_dir, is_search=True)
+
+    SCOPE_VIEW = {   # (режим, область) -> (иконка, подсказка)
+        ("server", "all"):    (ft.Icons.PUBLIC, "Поиск по всей библиотеке сервера"),
+        ("server", "folder"): (ft.Icons.FOLDER_OUTLINED, "Поиск в текущей папке и подпапках"),
+        ("local", "all"):     (ft.Icons.PUBLIC, "Поиск по всей локальной библиотеке"),
+        ("local", "folder"):  (ft.Icons.FOLDER_OUTLINED, "Поиск в текущей папке"),
+    }
+
+    def _sync_scope_btn(uri):
+        """Иконка и подсказка — по области того режима, в котором открыт uri."""
+        mode = _mode_of(uri)
+        search_scope_icon.icon, search_scope_btn.tooltip = SCOPE_VIEW[(mode, _search_scope[mode])]
+        try:
+            search_scope_btn.update()
+        except (RuntimeError, AssertionError):
+            pass   # контрол ещё не на странице
+
+    def on_search_scope_click(e):
+        mode = _mode_of(getattr(explorer_tree, "current_dir", ""))
+        scopes = _search_scope
+        scopes[mode] = "folder" if scopes[mode] == "all" else "all"
+        _sync_scope_btn(getattr(explorer_tree, "current_dir", ""))
+        if search_input.value.strip():
+            perform_search(immediate=True)
+
+    search_input = typing_field(ft.TextField(
         hint_text="Поиск файлов...",
         border=ft.InputBorder.NONE,
         text_size=text_size,
         dense=True,
         content_padding=2,
         cursor_color="amber",
-        on_change=perform_search # Вызов поиска при каждом изменении
-    )
+        on_change=perform_search # фильтр папки — сразу, поиск по библиотеке — после паузы в наборе
+    ))
 
     search_bar = ft.Container(
         content=search_input,
@@ -1191,6 +1318,21 @@ def App(page: ft.Page):
         padding=0, # Убрал padding, так как он есть внутри TextField
         bgcolor=ft.Colors.with_opacity(search_barBGOp, search_barBGCol),
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
+    )
+
+    search_scope_icon = ft.Icon(SCOPE_VIEW[("local", "folder")][0], size=search_scopeIconSize, color=search_scopeIconCol)
+    search_scope_btn = ft.Container(   # область серверного поиска, настройки в [UI search_bar]
+        content=search_scope_icon,
+        width=search_scopeWidth,
+        height=search_scopeHeight,
+        # в Row кнопка центрируется по вертикали; нижний отступ 2*lift поднимает центр на lift
+        margin=ft.Margin.only(bottom=2 * search_scopeLift),
+        alignment=ft.Alignment.CENTER,
+        border=ft.Border.all(1, ft.Colors.with_opacity(search_scopeBorderOp, search_scopeBorderCol)),
+        border_radius=search_scopeRadius,
+        bgcolor=ft.Colors.with_opacity(search_scopeBGOp, search_scopeBGCol),
+        tooltip=SCOPE_VIEW[("local", "folder")][1],
+        on_click=on_search_scope_click,
     )
     # Объявления объектов -----
 
@@ -1415,7 +1557,8 @@ def App(page: ft.Page):
         track_id, name, author, path, cov_bytes, position = row
         playlist_idl = current_playlist["id"]
 
-        unavailable = sources.is_remote(path) and not sources.server_online()
+        # сервер выключен или трек не удалось сыграть (Э7) — рисуем серым
+        unavailable = (sources.is_remote(path) and not sources.server_online()) or path in ui_utils.failed_uris
         cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
         if cov_bytes is not None:
             cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
@@ -1742,7 +1885,11 @@ def App(page: ft.Page):
                     pick_folder_button
                 ]
             ),
-            search_bar, # Поиск
+            ft.Row( # Поиск и область поиска
+                spacing=3,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[ft.Container(content=search_bar, expand=True), search_scope_btn],
+            ),
             # Stack кладёт индикатор ПОВЕРХ списка, не сдвигая его:
             # alignment=center центрирует по обеим осям рабочей зоны
             ft.Stack(
@@ -1787,6 +1934,11 @@ def App(page: ft.Page):
         сначала спрашиваем у источника список, потом рисуем."""
         src = sources.get(uri)
         if not src.is_remote:
+            # если ещё грузится серверная папка — забываем её: индикатор прячем,
+            # а её запоздавший ответ on_dir_ready выбросит (pending уже другой)
+            _pending_dir[0] = uri
+            _cancel_loading_timer()
+            _set_loading(False)
             rebuild_explorer(src.list_dir(uri), uri)
             return
 
@@ -1832,6 +1984,7 @@ def App(page: ft.Page):
 
     page.pubsub.subscribe_topic("dir_loading", on_dir_loading)
     page.pubsub.subscribe_topic("dir_ready", on_dir_ready)
+    page.pubsub.subscribe_topic("search_ready", on_search_ready)
 
     def on_change_explorer_status(e):
         mode = e.control.selected_index
@@ -1937,6 +2090,8 @@ def App(page: ft.Page):
 
     def on_keyboard(e: ft.KeyboardEvent, play_btn):
         print(f"Key pressed: {e.key} (ctrl={e.ctrl}, alt={e.alt}, shift={e.shift})")
+        if _typing:
+            return   # печатают в поле — не перехватываем
 
         if check_shortcut(e, pause_key, second_pause_key):
             ui_utils.playpause_btn_ev(e, play_btn)
@@ -2139,7 +2294,7 @@ def App(page: ft.Page):
                                                             ft.Button(content="<", on_click = lambda e: ui_utils.play_next_or_pred(e, False, play_btn)),
 
                                                             ft.Container( #play/pause
-                                                                content = play_btn,
+                                                                content = ft.Stack([play_btn, play_spinner]),
                                                                 shape = ft.BoxShape.CIRCLE,
                                                                 animate=200,
                                                                 scale=1.0,  # Изначальный размер (100%)
@@ -2275,7 +2430,33 @@ def App(page: ft.Page):
         start_time_label.update()
         end_time_label.update()
 
+    def on_player_state(topic, message):
+        """Сигналы bg_ui_process: buffering — индикатор вместо кнопки, stopped — плеер
+        встал после неудач (кнопка снова «Play», пропущенные треки серым)."""
+        if "buffering" in message:
+            play_spinner.visible = message["buffering"]
+            play_btn.visible = not message["buffering"]
+            if message["buffering"] and not _spinning[0]:
+                _spinning[0] = True
+                page.run_task(spin_logo)
+            elif not message["buffering"]:
+                _spinning[0] = False
+        if message.get("stopped"):
+            _spinning[0] = False
+            play_spinner.visible = False
+            play_btn.visible = True
+            play_btn.src = "assets/icons/play_ico_inac.png"
+            rebuild_queue_ui()
+        play_spinner.update()
+        play_btn.update()
+
+    def on_player_notice(topic, message):
+        """Короткое сообщение внизу окна: повтор, пропуск трека, остановка."""
+        page.show_dialog(ft.SnackBar(ft.Text(message["text"]), duration=3000))
+
     # Регистрация подписчиков по топикам
+    page.pubsub.subscribe_topic("player_state", on_player_state)
+    page.pubsub.subscribe_topic("player_notice", on_player_notice)
     page.pubsub.subscribe_topic("tags_update", on_tags_changed)
     page.pubsub.subscribe_topic("playback_update", on_playback_update)
 
@@ -2285,6 +2466,9 @@ def App(page: ft.Page):
         page.pubsub.unsubscribe_topic("queue_progress", on_queue_progress)
         page.pubsub.unsubscribe_topic("cover_ready", on_cover_ready)
         page.pubsub.unsubscribe_topic("dir_ready", on_dir_ready)
+        page.pubsub.unsubscribe_topic("search_ready", on_search_ready)
+        page.pubsub.unsubscribe_topic("player_state", on_player_state)
+        page.pubsub.unsubscribe_topic("player_notice", on_player_notice)
         page.pubsub.unsubscribe_topic("dir_loading", on_dir_loading)
 
     page.on_disconnect = handle_disconnect
@@ -2293,6 +2477,8 @@ def App(page: ft.Page):
         """Сервер появился или пропал — гасим/включаем сегмент «Сервер»."""
         online = message.get("online")
         mode_explorer_status_button.disabled = not online
+        if online:
+            ui_utils.failed_uris.clear()   # сервер вернулся — пропущенные треки снова не серые
         rebuild_queue_ui()
         playlist_ui(page, playlist_list, play_btn, playlist_id)
         if not online and explorer_view.data["mode"] == 1:

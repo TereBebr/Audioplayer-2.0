@@ -93,9 +93,11 @@ def tracks_under(folder_path: str = ""):
         return [dict(r) for r in db.tracks_under_dir(con, folder_path)]
 
 @app.get("/server/search")
-def all_library_search(filename: str):
+def all_library_search(q: str, folder_path: str=""):
+    if folder_path and not safe_path(folder_path).is_dir():   # safe_path сам даст 403 на ../
+        raise HTTPException(404, "folder not found")
     with closing(db.get_conn(cfg.db_path)) as con:
-        content = db.search_tracks(con, filename, search_tracks_limit)
+        content = db.search_tracks(con, q, search_tracks_limit, folder_path)
     return content
 
 @app.get("/server/track/{track_id}")
