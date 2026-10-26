@@ -13,6 +13,14 @@ foreach ($d in @("vlc_engine", "assets", "storage")) {
     Copy-Item -Recurse -Force $d "$out\$d"
 }
 foreach ($f in @("config.txt", "ui_config.txt")) { Copy-Item -Force $f "$out\$f" }
+# В архив — config.txt без ВАШИХ токена и адреса сервера: архив раздаётся друзьям,
+# свои token и base_url они впишут сами. Ваш config.txt в папке проекта не меняется.
+# Запись без BOM: с ним configparser не узнаёт первую строку [Main Settings]
+$cfg = Join-Path (Resolve-Path $out) "config.txt"
+$lines = [System.IO.File]::ReadAllLines($cfg, [System.Text.Encoding]::UTF8) `
+    -replace '^(\s*token\s*=).*', '$1' `
+    -replace '^(\s*base_url\s*=).*', '$1'
+[System.IO.File]::WriteAllLines($cfg, $lines, (New-Object System.Text.UTF8Encoding $false))
 New-Item -ItemType Directory -Force -Path "$out\music" | Out-Null
 
 Write-Host "[3/4] Кладу клиент Flet (чтобы он не качался при первом запуске)..." -ForegroundColor Cyan

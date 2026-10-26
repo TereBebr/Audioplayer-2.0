@@ -1410,7 +1410,7 @@ def App(page: ft.Page):
     vol_label = ft.Text(str(start_vol_val), size=text_size, color=textCol, font_family=font_family)
 
     track_cover = ft.Image(
-        src="https://flet.dev/img/logo.svg",
+        src="assets/icons/playerPreveiw.png",
         width=player_coverSize,
         height=player_coverSize,
         border_radius=ft.BorderRadius.all(radius),
@@ -2461,7 +2461,7 @@ def App(page: ft.Page):
         idx = message.get("idx", 0)
         
         if message.get("cover", ""): track_cover.src = message.get("cover", "")
-        else: track_cover.src = "https://flet.dev/img/logo.svg"
+        else: track_cover.src = "assets/icons/playerPreveiw.png"
 
         # Обновляем DBOX явно. Раньше это происходило побочно: rebuild_queue_ui
         # заканчивался page.update(). Теперь очередь обновляет только свой
