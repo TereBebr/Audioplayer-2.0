@@ -6,6 +6,48 @@ text_size=12
 
 ; Закругление обложки трека, по стандарту 16. Если ставить больше чем b_radius, будет видно уголки
 radius = 16
+
+; --- Общие цвета и шрифт ---
+; Цвет можно задать как #HEX (#6A5ACD) или именем цвета Flet: white, gray, amber, green, blue, indigo800 ...
+; Имена вроде onsurface, outline, surfacecontainerhighest — это цвета темы Flet, они подстраиваются под тему
+; ВАЖНО: неизвестное имя (например magenta) Flet молча игнорирует — элемент останется без цвета. Если сомневаетесь — пишите #HEX
+
+; Шрифт текста в нижней панели и в заголовке плейлиста, по стандарту Arial
+font_family = Arial
+
+; Акцентный цвет: стрелка «...» в проводнике, курсор в строке поиска. По стандарту amber
+accentCol = amber
+
+; Основной текст: название трека, время, громкость, заголовок плейлиста. По стандарту white
+textCol = white
+
+; Второстепенный текст: исполнитель, альбом, год, «Папка пуста». По стандарту gray
+textSecondaryCol = gray
+
+; Играющий трек в очереди: рамка и название. По стандарту green
+playingCol = green
+
+; Подсветка места, куда можно бросить при перетаскивании. По стандарту blueaccent
+dropCol = blueaccent
+
+; Недоступные треки (сервер выключен или трек не открылся) и сегмент «Сервер». По стандарту outline
+unavailableCol = outline
+
+; Иконка-облако у недоступных треков. По стандарту onsurfacevariant
+unavailableIconCol = onsurfacevariant
+
+; Ползунки перемотки и громкости. По стандарту indigo800
+sliderThumbCol = indigo800
+
+; Кнопки «Сохранить» в диалогах: фон и текст. По стандарту blue и white
+buttonBGCol = blue
+buttonTextCol = white
+
+; Карточка, которая тянется за курсором при перетаскивании в очереди и плейлистах. По стандарту inversesurface
+dragBGCol = inversesurface
+
+; Прозрачность этой карточки <=1.00, по стандарту 0.8
+dragOp = 0.8
 ;--
 
 ;ЗАДНИКИ
@@ -14,25 +56,80 @@ radius = 16
 ; Закругление рамки UBOX, по стандарту 16
 b_radius = 16
 
+; Фон (стеклянный эффект): цвет и прозрачность <=1.00. По стандарту #ffffff и 0.1
+b_BGCol = #ffffff
+b_BGOp = 0.1
+
+; Рамка: цвет и прозрачность <=1.00. По стандарту #ffffff и 0.2
+b_BorderCol = #ffffff
+b_BorderOp = 0.2
+
+; Размытие заднего плана, по стандарту 1.5
+b_blur = 1.5
+
 [LBOX Settings]
 
 ; Закругление рамки LBOX, по стандарту 16
 b_radius = 16
+
+; Фон (стеклянный эффект): цвет и прозрачность <=1.00. По стандарту #ffffff и 0.1
+b_BGCol = #ffffff
+b_BGOp = 0.1
+
+; Рамка: цвет и прозрачность <=1.00. По стандарту #ffffff и 0.2
+b_BorderCol = #ffffff
+b_BorderOp = 0.2
+
+; Размытие заднего плана, по стандарту 1.5
+b_blur = 1.5
 
 [CBOX Settings]
 
 ; Закругление рамки CBOX, по стандарту 16
 b_radius = 16
 
+; Фон (стеклянный эффект): цвет и прозрачность <=1.00. По стандарту #ffffff и 0.1
+b_BGCol = #ffffff
+b_BGOp = 0.1
+
+; Рамка: цвет и прозрачность <=1.00. По стандарту #ffffff и 0.2
+b_BorderCol = #ffffff
+b_BorderOp = 0.2
+
+; Размытие заднего плана, по стандарту 1.5
+b_blur = 1.5
+
 [RBOX Settings]
 
 ; Закругление рамки RBOX, по стандарту 16
 b_radius = 16
 
+; Фон (стеклянный эффект): цвет и прозрачность <=1.00. По стандарту #ffffff и 0.1
+b_BGCol = #ffffff
+b_BGOp = 0.1
+
+; Рамка: цвет и прозрачность <=1.00. По стандарту #ffffff и 0.2
+b_BorderCol = #ffffff
+b_BorderOp = 0.2
+
+; Размытие заднего плана, по стандарту 1.5
+b_blur = 1.5
+
 [DBOX Settings]
 
 ; Закругление рамки DBOX, по стандарту 16
 b_radius = 16
+
+; Фон (стеклянный эффект): цвет и прозрачность <=1.00. По стандарту #ffffff и 0.1
+b_BGCol = #ffffff
+b_BGOp = 0.1
+
+; Рамка: цвет и прозрачность <=1.00. По стандарту #ffffff и 0.2
+b_BorderCol = #ffffff
+b_BorderOp = 0.2
+
+; Размытие заднего плана, по стандарту 1.5
+b_blur = 1.5
 
 
 
@@ -54,6 +151,18 @@ adress_barBorderCol = #ededed
 
 ; Прозрачность рамки строки <=1.00
 adress_barBorderOp = 0.4
+
+; Высота строки, по стандарту 30
+adress_barHeight = 30
+
+; Скругление углов строки, по стандарту 8
+adress_barRadius = 8
+
+; Цвет сегментов пути (они кликабельны), по стандарту blue
+adress_barLinkCol = blue
+
+; Цвет разделителей « / » между сегментами, по стандарту grey400
+adress_barSepCol = grey400
 
 [UI adress_button] ; точечная настройка дизайна кнопки выбора файла
 
@@ -111,10 +220,41 @@ search_scopeBorderOp = 0.4
 ; Скругление углов кнопки, по стандарту 8
 search_scopeRadius = 8
 
+[UI explorer] ; список папок и файлов в проводнике
+
+; Размер иконок папок и файлов, по стандарту 16
+explorer_iconSize = 16
+
+; Размер имён папок и файлов, по стандарту 12
+explorer_textSize = 12
+
+; Карточка «Перемещение: ...» при перетаскивании файла: размер текста, ширина, фон, скругление
+; По стандарту 10, 180, surfacecontainerhighest, 5
+explorer_dragTextSize = 10
+explorer_dragWidth = 180
+explorer_dragBGCol = surfacecontainerhighest
+explorer_dragRadius = 5
+
+; Логотип загрузки поверх списка (пока грузится серверная папка): размер и прозрачность <=1.00
+; По стандарту 100 и 0.85
+explorer_loadingSize = 100
+explorer_loadingOp = 0.85
+
 [UI queue_bar] ; настройка размера и цвета ячеек очереди
 
 ; Скругление ячейки (целое число). по стандарту 8
 queue_border_radius = 8
+
+; Фон ячейки и фон играющей ячейки. По стандарту surfacecontainerhighest и surfacecontainerhigh
+queue_cellBGCol = surfacecontainerhighest
+queue_cellPlayingBGCol = surfacecontainerhigh
+
+; Цвет названия и исполнителя. По стандарту onsurface и onsurfacevariant
+queue_titleCol = onsurface
+queue_authorCol = onsurfacevariant
+
+; Фон всей панели очереди, по стандарту surfacecontainerlow
+queue_panelBGCol = surfacecontainerlow
 
 ; Use autopresets/Use presets/Customise all
 
@@ -157,6 +297,10 @@ queue_cell6 = 33
 ; Скругление ячейки (целое число). по стандарту 8
 track_border_radius = 8
 
+; Цвет названия и исполнителя. По стандарту onsurface и onsurfacevariant
+track_titleCol = onsurface
+track_authorCol = onsurfacevariant
+
 ; Use autopresets/Use presets/Customise all
 
 ; Поставьте цифру в соответствии используемой стратегии настройки размера ячеек:
@@ -192,3 +336,30 @@ track_cell3 = 8
 track_cell4 = 0
 track_cell5 = 1
 track_cell6 = 33
+
+[UI player] ; нижняя панель с текущим треком
+
+; Размер кнопки Play/Pause (и логотипа загрузки на её месте), по стандарту 45
+player_buttonSize = 45
+
+; Размер обложки трека, по стандарту 150
+player_coverSize = 150
+
+[UI playlist] ; верхняя часть средней панели: открытый плейлист и строка карточек
+
+; Размер обложки открытого плейлиста и цвет фона под ней. По стандарту 100 и black
+playlist_coverSize = 100
+playlist_coverBGCol = black
+
+; Размер кнопки Play у плейлиста, по стандарту 30
+playlist_playIconSize = 30
+
+; Размер карточек плейлистов в строке и их скругление. По стандарту 50 и 12
+playlist_cardSize = 50
+playlist_cardRadius = 12
+
+[UI dialogs] ; диалоговые окна
+
+; Заглушка обложки в окне «Выберите альбомы»: фон и скругление. По стандарту bluegrey700 и 5
+dialog_albumTileBGCol = bluegrey700
+dialog_albumTileRadius = 5

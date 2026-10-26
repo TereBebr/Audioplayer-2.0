@@ -34,6 +34,7 @@ if sources.is_remote(p):
     # Серверная стартовая папка — отдельно, start_server_path
     logger.warning(f"start_path = {p}: должен быть локальным, беру ./music")
     p = './music'
+p = os.path.abspath(p)   # абсолютный: от него строятся URI треков и поиск по библиотеке
 folder_items = sources.get(p).list_dir(p) # содержимое начальной папки
 # =================
 
@@ -86,9 +87,67 @@ search_scopeBGOp = config.getfloat('UI search_bar', 'search_scopeBGOp', fallback
 search_scopeBorderCol = config.get('UI search_bar', 'search_scopeBorderCol', fallback=search_barBorderCol) # Цвет рамки кнопки
 search_scopeBorderOp = config.getfloat('UI search_bar', 'search_scopeBorderOp', fallback=search_barBorderOp) # Прозрачность рамки кнопки
 search_scopeRadius = config.getint('UI search_bar', 'search_scopeRadius', fallback=search_bar_radius) # Скругление углов кнопки
+#Конфиги общих цветов и шрифта ([UI Settings]) ==========
+# fallback везде = прежнее значение из кода: старый ui_config.txt без этих ключей даёт тот же вид
+font_family = config.get('UI Settings', 'font_family', fallback='Arial') # Шрифт текста в панели плеера и плейлиста
+accentCol = config.get('UI Settings', 'accentCol', fallback='amber') # Акцент: «...» в проводнике, курсор в поиске
+textCol = config.get('UI Settings', 'textCol', fallback='white') # Основной текст: название трека, время, громкость, заголовок плейлиста
+textSecondaryCol = config.get('UI Settings', 'textSecondaryCol', fallback='gray') # Второстепенный текст: исполнитель, альбом, год, «Папка пуста»
+playingCol = config.get('UI Settings', 'playingCol', fallback='green') # Играющий трек в очереди: рамка и название
+dropCol = config.get('UI Settings', 'dropCol', fallback='blueaccent') # Подсветка места, куда бросить при перетаскивании
+unavailableCol = config.get('UI Settings', 'unavailableCol', fallback='outline') # Недоступные треки и сегмент «Сервер» без сервера
+unavailableIconCol = config.get('UI Settings', 'unavailableIconCol', fallback='onsurfacevariant') # Иконка-облако у недоступных треков
+sliderThumbCol = config.get('UI Settings', 'sliderThumbCol', fallback='indigo800') # Ползунки перемотки и громкости
+buttonBGCol = config.get('UI Settings', 'buttonBGCol', fallback='blue') # Фон кнопок «Сохранить» в диалогах
+buttonTextCol = config.get('UI Settings', 'buttonTextCol', fallback='white') # Текст кнопок «Сохранить»
+dragBGCol = config.get('UI Settings', 'dragBGCol', fallback='inversesurface') # Карточка, которая тянется за курсором (очередь, плейлисты)
+dragOp = config.getfloat('UI Settings', 'dragOp', fallback=0.8) # Прозрачность этой карточки
+
+def box_style(section):
+    """Стеклянный задник бокса (UBOX, LBOX, ...): фон, рамка, размытие из его секции."""
+    blur = config.getfloat(section, 'b_blur', fallback=1.5)
+    return dict(
+        bgcolor=ft.Colors.with_opacity(config.getfloat(section, 'b_BGOp', fallback=0.1),
+                                       config.get(section, 'b_BGCol', fallback='#ffffff')),
+        border=ft.Border.all(1, ft.Colors.with_opacity(config.getfloat(section, 'b_BorderOp', fallback=0.2),
+                                                       config.get(section, 'b_BorderCol', fallback='#ffffff'))),
+        blur=ft.Blur(sigma_x=blur, sigma_y=blur, tile_mode=ft.BlurTileMode.CLAMP),
+    )
+
+#Конфиги adress_bar: размеры и крошки =======
+adress_barHeight = config.getint('UI adress_bar', 'adress_barHeight', fallback=30) # Высота строки
+adress_barRadius = config.getint('UI adress_bar', 'adress_barRadius', fallback=8) # Скругление углов строки
+adress_barLinkCol = config.get('UI adress_bar', 'adress_barLinkCol', fallback='blue') # Цвет сегментов пути (ссылок)
+adress_barSepCol = config.get('UI adress_bar', 'adress_barSepCol', fallback='grey400') # Цвет разделителей « / »
+#Конфиги explorer =======
+explorer_iconSize = config.getint('UI explorer', 'explorer_iconSize', fallback=16) # Размер иконок папок и файлов
+explorer_textSize = config.getint('UI explorer', 'explorer_textSize', fallback=12) # Размер имён папок и файлов
+explorer_dragTextSize = config.getint('UI explorer', 'explorer_dragTextSize', fallback=10) # Размер текста «Перемещение: ...»
+explorer_dragWidth = config.getint('UI explorer', 'explorer_dragWidth', fallback=180) # Ширина карточки «Перемещение: ...»
+explorer_dragBGCol = config.get('UI explorer', 'explorer_dragBGCol', fallback='surfacecontainerhighest') # Фон этой карточки
+explorer_dragRadius = config.getint('UI explorer', 'explorer_dragRadius', fallback=5) # Скругление этой карточки
+explorer_loadingSize = config.getint('UI explorer', 'explorer_loadingSize', fallback=100) # Размер логотипа загрузки над списком
+explorer_loadingOp = config.getfloat('UI explorer', 'explorer_loadingOp', fallback=0.85) # Прозрачность логотипа загрузки
+#Конфиги player (нижняя панель) =======
+player_buttonSize = config.getint('UI player', 'player_buttonSize', fallback=45) # Кнопка Play/Pause и логотип загрузки на её месте
+player_coverSize = config.getint('UI player', 'player_coverSize', fallback=150) # Обложка трека
+#Конфиги playlist =======
+playlist_coverSize = config.getint('UI playlist', 'playlist_coverSize', fallback=100) # Обложка открытого плейлиста
+playlist_coverBGCol = config.get('UI playlist', 'playlist_coverBGCol', fallback='black') # Фон под обложкой плейлиста
+playlist_playIconSize = config.getint('UI playlist', 'playlist_playIconSize', fallback=30) # Кнопка Play у плейлиста
+playlist_cardSize = config.getint('UI playlist', 'playlist_cardSize', fallback=50) # Карточки плейлистов в строке
+playlist_cardRadius = config.getint('UI playlist', 'playlist_cardRadius', fallback=12) # Скругление карточек
+#Конфиги dialogs =======
+dialog_albumTileBGCol = config.get('UI dialogs', 'dialog_albumTileBGCol', fallback='bluegrey700') # Фон заглушки обложки в «Выберите альбомы»
+dialog_albumTileRadius = config.getint('UI dialogs', 'dialog_albumTileRadius', fallback=5) # Скругление этой заглушки
 # ==== queue_cell presets: ===
 # (размер обложки, размер названия, размер автора, расстояние между ними, отступы внутри ячейки, высота ячейки)
 queue_border_radius = config.getint('UI queue_bar','queue_border_radius')
+queue_cellBGCol = config.get('UI queue_bar', 'queue_cellBGCol', fallback='surfacecontainerhighest') # Фон ячейки
+queue_cellPlayingBGCol = config.get('UI queue_bar', 'queue_cellPlayingBGCol', fallback='surfacecontainerhigh') # Фон играющей ячейки
+queue_titleCol = config.get('UI queue_bar', 'queue_titleCol', fallback='onsurface') # Цвет названия
+queue_authorCol = config.get('UI queue_bar', 'queue_authorCol', fallback='onsurfacevariant') # Цвет исполнителя
+queue_panelBGCol = config.get('UI queue_bar', 'queue_panelBGCol', fallback='surfacecontainerlow') # Фон панели очереди
 method_queue_settings = config.getint('UI queue_bar','method_queue_settings')
 match method_queue_settings:
     case 0: 
@@ -121,6 +180,8 @@ match method_queue_settings:
         queue_cell.append(queue_cell6)
 
 track_border_radius = config.getint('UI track_bar','track_border_radius')
+track_titleCol = config.get('UI track_bar', 'track_titleCol', fallback='onsurface') # Цвет названия
+track_authorCol = config.get('UI track_bar', 'track_authorCol', fallback='onsurfacevariant') # Цвет исполнителя
 method_tracks_settings = config.getint('UI track_bar','method_tracks_settings')
 match method_tracks_settings:
     case 0: 
@@ -383,8 +444,8 @@ def App(page: ft.Page):
 
     play_btn=ft.Image(
     src="assets/icons/play_ico_inac.png",
-    width=45,          
-    height=45,         
+    width=player_buttonSize,
+    height=player_buttonSize,
     fit="contain",
     )
     # Показывается ВМЕСТО play_btn, пока сетевой трек подгружается (Э7).
@@ -393,8 +454,8 @@ def App(page: ft.Page):
     # animate_rotation плавно доводит. Крутит spin_logo(), пока spinner виден.
     play_spinner = ft.Image(
         src="assets/icons/loading_ico.png",
-        width=45,
-        height=45,
+        width=player_buttonSize,
+        height=player_buttonSize,
         fit="contain",
         rotate=ft.Rotate(0, alignment=ft.Alignment.CENTER),
         animate_rotation=ft.Animation(1000, ft.AnimationCurve.LINEAR),
@@ -447,12 +508,10 @@ def App(page: ft.Page):
             close_dialog(page, dlg)  # сначала закрыть, потом перестраивать UI
             if not selected_albums:
                 return
-            for alb in selected_albums:
-                ui_utils.add_track_to_playlist(track_path, alb)
-            logger.debug(f"Трек {track_path} добавлен в альбомы: {selected_albums}")
-            # если добавляли в открытый сейчас плейлист — обновляем рабочую зону
-            if current_playlist["id"] in selected_albums:
-                playlist_ui(page, playlist_list, play_btn, current_playlist["id"])
+            # если добавляли в открытый сейчас плейлист — по окончании обновим рабочую зону
+            show = current_playlist["id"] if current_playlist["id"] in selected_albums else None
+            ui_utils.add_to_playlists_bg(page, track_path, list(selected_albums), show_after=show)
+            logger.debug(f"Трек {track_path} добавляется в альбомы: {selected_albums}")
 
         def get_playlists():
             albums = []
@@ -469,8 +528,8 @@ def App(page: ft.Page):
                 content=ft.Icon(ft.Icons.ALBUM, color=ft.Colors.WHITE, size=24),
                 width=40,
                 height=40,
-                bgcolor=ft.Colors.BLUE_GREY_700,
-                border_radius=5,
+                bgcolor=dialog_albumTileBGCol,
+                border_radius=dialog_albumTileRadius,
             )
             album_controls.append(
                 ft.Row(
@@ -503,7 +562,7 @@ def App(page: ft.Page):
             ),
             actions=[
                 ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
-                ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+                ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=buttonBGCol, color=buttonTextCol)
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -579,7 +638,7 @@ def App(page: ft.Page):
                 ),
                 actions=[
                     ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
-                    ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+                    ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=buttonBGCol, color=buttonTextCol)
                 ],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
@@ -641,7 +700,7 @@ def App(page: ft.Page):
             ),
             actions=[
                 ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
-                ft.ElevatedButton("Сохранить", on_click=lambda e: save_selection(e, p_id=pl_id), bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE)
+                ft.ElevatedButton("Сохранить", on_click=lambda e: save_selection(e, p_id=pl_id), bgcolor=buttonBGCol, color=buttonTextCol)
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -686,8 +745,8 @@ def App(page: ft.Page):
                     on_double_tap=lambda e: ui_utils.on_item_click(e, open_dir, play_btn),
                     mouse_cursor=ft.MouseCursor.CLICK,
                     content=ft.Row([
-                ft.Icon(ft.Icons.ARROW_UPWARD, size=16, color="amber"),
-                ft.Text("...", size=12, color="amber"),
+                ft.Icon(ft.Icons.ARROW_UPWARD, size=explorer_iconSize, color=accentCol),
+                ft.Text("...", size=explorer_textSize, color=accentCol),
                     ])
                 )
         )
@@ -697,7 +756,7 @@ def App(page: ft.Page):
                 empty_text = "Ничего не найдено" if is_search else "Папка пуста"
             explorer_tree.controls.append(
                 ft.Container(
-                    content=ft.Text(empty_text, size=12, color="gray", italic=True),
+                    content=ft.Text(empty_text, size=explorer_textSize, color=textSecondaryCol, italic=True),
                     padding=10
                 )
             )
@@ -712,8 +771,7 @@ def App(page: ft.Page):
                             secondary_items=[
                                 ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, full_item_path, None),),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=full_item_path: (
-                                    ui_utils.add_track_to_playlist(p, 2),
-                                    playlist_ui(page, playlist_list, play_btn, 2)
+                                    ui_utils.add_to_playlists_bg(page, p, [2], show_after=2),
                                 )),
                                 ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=full_item_path: show_albums_dialog(e, p)),
                                 ft.PopupMenuItem(content=ft.Text("Расположение файла"), on_click=lambda e, p=full_item_path: ui_utils.open_file_folder(e, p)),
@@ -725,18 +783,18 @@ def App(page: ft.Page):
                             content=ft.Row([
                                 ft.Icon(
                                     ft.Icons.FOLDER if item["type"] == "folder" else ft.Icons.AUDIOTRACK,
-                                    size=16
+                                    size=explorer_iconSize
                                 ),
-                                ft.Text(item["name"], size=12, overflow=ft.TextOverflow.ELLIPSIS),
+                                ft.Text(item["name"], size=explorer_textSize, overflow=ft.TextOverflow.ELLIPSIS),
                             ])
                             )
                         ),
                         content_when_dragging=ft.Container(
-                            content=ft.Text(f"Перемещение: {item['name']}", size=10, overflow=ft.TextOverflow.ELLIPSIS),
+                            content=ft.Text(f"Перемещение: {item['name']}", size=explorer_dragTextSize, overflow=ft.TextOverflow.ELLIPSIS),
                             padding=10,
-                            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST, 
-                            border_radius=5,
-                            width=180,
+                            bgcolor=explorer_dragBGCol,
+                            border_radius=explorer_dragRadius,
+                            width=explorer_dragWidth,
                         )
                     )
                 )
@@ -752,7 +810,7 @@ def App(page: ft.Page):
                 ft.TextSpan(
                     text=label,
                     style=ft.TextStyle(
-                        color=ft.Colors.BLUE,
+                        color=adress_barLinkCol,
                         decoration=ft.TextDecoration.UNDERLINE,
                         size=text_size  # Синхронизируем с твоим конфигом
                     ),
@@ -764,7 +822,7 @@ def App(page: ft.Page):
                 spans.append(
                     ft.TextSpan(
                         text=" / ",
-                        style=ft.TextStyle(color=ft.Colors.GREY_400, size=text_size)
+                        style=ft.TextStyle(color=adress_barSepCol, size=text_size)
                     )
                 )
         return spans
@@ -1017,11 +1075,11 @@ def App(page: ft.Page):
     def make_queue_drop_handlers(container, is_playing):
         """Подсветка ячейки очереди при наведении перетаскиваемого объекта."""
         def _on_will_accept(e):
-            container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+            container.border = ft.Border.all(2, dropCol)
             container.update()
 
         def _on_leave(e):
-            border_col = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
+            border_col = playingCol if is_playing else ft.Colors.TRANSPARENT
             container.border = ft.Border.all(2, border_col)
             container.update()
 
@@ -1034,15 +1092,15 @@ def App(page: ft.Page):
         unavailable = (sources.is_remote(path) and not sources.server_online()) or path in ui_utils.failed_uris
         # 1. Визуальное оформление играющего трека (id == 0)
         is_playing = (track_id == 0)
-        border_color = ft.Colors.GREEN if is_playing else ft.Colors.TRANSPARENT
-        bg_color = ft.Colors.SURFACE_CONTAINER_HIGHEST if not is_playing else ft.Colors.SURFACE_CONTAINER_HIGH
+        border_color = playingCol if is_playing else ft.Colors.TRANSPARENT
+        bg_color = queue_cellBGCol if not is_playing else queue_cellPlayingBGCol
 
         # Попытка декодировать обложку (если она есть)
         if cov_bytes is None:
             cover_worker.request_cover(path)
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
         else:
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
 
         item_content = ft.Container(
             content=ft.ContextMenu(
@@ -1050,10 +1108,10 @@ def App(page: ft.Page):
                     cover_img,
                     ft.Column([
                         ft.Text(name, size=queue_cell[1], weight=ft.FontWeight.BOLD,
-                                color=ft.Colors.OUTLINE if unavailable
-                                      else (ft.Colors.GREEN if is_playing else ft.Colors.ON_SURFACE)),
+                                color=unavailableCol if unavailable
+                                      else (playingCol if is_playing else queue_titleCol)),
                         ft.Text(author, size=queue_cell[2],
-                                color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE_VARIANT)
+                                color=unavailableCol if unavailable else queue_authorCol)
                     ], spacing=queue_cell[3])
                 ]),
                 secondary_items=[
@@ -1063,8 +1121,7 @@ def App(page: ft.Page):
                         ),
                     ),
                     ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                            ui_utils.add_track_to_playlist(p, 2),
-                            playlist_ui(page, playlist_list, play_btn, 2)
+                            ui_utils.add_to_playlists_bg(page, p, [2], show_after=2),
                         ),
                     ),
                     ft.PopupMenuItem(content=ft.Text("Добавить в альбом"), on_click=lambda e, p=path: show_albums_dialog(e, p)),
@@ -1108,9 +1165,9 @@ def App(page: ft.Page):
                     padding=queue_cell[4],
                     height=queue_cell[5],
                     margin=queue_vlist.cell_margin(),
-                    bgcolor=ft.Colors.INVERSE_SURFACE,
+                    bgcolor=dragBGCol,
                     border_radius=queue_border_radius,
-                    opacity=0.8
+                    opacity=dragOp
                 )
             )
         )
@@ -1150,7 +1207,7 @@ def App(page: ft.Page):
             if next_item is not None and idx == 1:
                 title_text = queue_cell_title(next_item.content.content)
                 if title_text is not None:
-                    title_text.color = ft.Colors.GREEN
+                    title_text.color = playingCol
 
             page.update()
             await asyncio.sleep(0.45)
@@ -1173,7 +1230,7 @@ def App(page: ft.Page):
         expand=True,
         padding=10,
         border_radius=RBOX_b_radius,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+        bgcolor=queue_panelBGCol,
     )
     page.run_task(skip_track_with_animation,page, queue_list, rebuild_queue_ui, 0)
 
@@ -1202,9 +1259,9 @@ def App(page: ft.Page):
 
     address_bar = ft.Container(
         content=path_row,
-        height=30,
+        height=adress_barHeight,
         border=ft.Border.all(1, ft.Colors.with_opacity(adress_barBorderOp, adress_barBorderCol)),
-        border_radius=8,
+        border_radius=adress_barRadius,
         padding=5,
         bgcolor=ft.Colors.with_opacity(adress_barBGOp, adress_barBGCol), # цвет SURFACE_CONTAINER_HIGHEST
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
@@ -1302,7 +1359,7 @@ def App(page: ft.Page):
         text_size=text_size,
         dense=True,
         content_padding=2,
-        cursor_color="amber",
+        cursor_color=accentCol,
         on_change=perform_search # фильтр папки — сразу, поиск по библиотеке — после паузы в наборе
     ))
 
@@ -1332,17 +1389,17 @@ def App(page: ft.Page):
     )
     # Объявления объектов -----
 
-    track_title = ft.Text(tags["Название"] or "Выберите трек", size=text_size + 2, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
-    track_artist = ft.Text(tags["Автор"] if tags["Автор"] else "Исполнитель", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
-    track_album = ft.Text(tags["Альбом"] if tags["Альбом"] else "Альбом", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
-    track_year = ft.Text(tags["Год"] if tags["Год"] else "Год", size=text_size, color="gray", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS,)
+    track_title = ft.Text(tags["Название"] or "Выберите трек", size=text_size + 2, color=textCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS,)
+    track_artist = ft.Text(tags["Автор"] if tags["Автор"] else "Исполнитель", size=text_size, color=textSecondaryCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS,)
+    track_album = ft.Text(tags["Альбом"] if tags["Альбом"] else "Альбом", size=text_size, color=textSecondaryCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS,)
+    track_year = ft.Text(tags["Год"] if tags["Год"] else "Год", size=text_size, color=textSecondaryCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS,)
 
-    start_time_label = ft.Text("00:00", size=text_size, color="white", font_family="Arial")
-    end_time_label = ft.Text("00:00", size=text_size, color="white", font_family="Arial")
+    start_time_label = ft.Text("00:00", size=text_size, color=textCol, font_family=font_family)
+    end_time_label = ft.Text("00:00", size=text_size, color=textCol, font_family=font_family)
     
     main_slider = ft.Slider( 
         #expand=3,
-        thumb_color=ft.Colors.INDIGO_800,
+        thumb_color=sliderThumbCol,
         min=0, 
         max=100,
         value=0, 
@@ -1350,12 +1407,12 @@ def App(page: ft.Page):
         on_change_end=lambda e: ui_utils.slider_event(e, start_time_label),
     )
 
-    vol_label = ft.Text(str(start_vol_val), size=text_size, color="white", font_family="Arial")
+    vol_label = ft.Text(str(start_vol_val), size=text_size, color=textCol, font_family=font_family)
 
     track_cover = ft.Image(
         src="https://flet.dev/img/logo.svg",
-        width=150,
-        height=150,
+        width=player_coverSize,
+        height=player_coverSize,
         border_radius=ft.BorderRadius.all(radius),
     )
 
@@ -1385,18 +1442,18 @@ def App(page: ft.Page):
     # читают id отсюда, поэтому их не нужно пересоздавать при смене плейлиста.
     current_playlist = {"id": 2}
 
-    playlist_title_text = ft.Text("", size=text_size + 4, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
-    playlist_desc_text = ft.Text("", size=text_size - 2, weight=ft.FontWeight.BOLD, color="white", font_family="Arial", overflow=ft.TextOverflow.ELLIPSIS)
+    playlist_title_text = ft.Text("", size=text_size + 4, weight=ft.FontWeight.BOLD, color=textCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS)
+    playlist_desc_text = ft.Text("", size=text_size - 2, weight=ft.FontWeight.BOLD, color=textCol, font_family=font_family, overflow=ft.TextOverflow.ELLIPSIS)
 
     playlist_data = ft.Container(
-        height=100,
+        height=playlist_coverSize,
         # bgcolor=ft.Colors.RED_800,
         content=ft.Row(
             controls=[
                 ft.Container(
-                    height=100,
-                    width=100,
-                    bgcolor=ft.Colors.BLACK
+                    height=playlist_coverSize,
+                    width=playlist_coverSize,
+                    bgcolor=playlist_coverBGCol
                 ),
                 ft.Column(
                     expand=4,
@@ -1416,8 +1473,8 @@ def App(page: ft.Page):
                     expand=1,
                     content=ft.Image(
                         src="assets/icons/play_ico_inac.png",
-                        width=30,
-                        height=30,
+                        width=playlist_playIconSize,
+                        height=playlist_playIconSize,
                         fit="contain",
                     ),
                     alignment=ft.Alignment.BOTTOM_RIGHT,
@@ -1540,7 +1597,7 @@ def App(page: ft.Page):
                     playlist_ui(page, playlist_list, play_btn, pl_id)
 
         def _on_will_accept(e):
-            container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+            container.border = ft.Border.all(2, dropCol)
             container.update()
 
         def _on_leave(e):
@@ -1555,9 +1612,9 @@ def App(page: ft.Page):
 
         # сервер выключен или трек не удалось сыграть (Э7) — рисуем серым
         unavailable = (sources.is_remote(path) and not sources.server_online()) or path in ui_utils.failed_uris
-        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
+        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
         if cov_bytes is not None:
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=ft.Colors.ON_SURFACE_VARIANT) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
 
         # Сам контент трека. Здесь вешаем on_double_click
         item_content = ft.Container(
@@ -1565,9 +1622,9 @@ def App(page: ft.Page):
                 cover_img,
                 ft.Column([
                     ft.Text(name, size=track_cell[1], weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE),
+                            color=unavailableCol if unavailable else track_titleCol),
                     ft.Text(author, size=track_cell[2],
-                            color=ft.Colors.OUTLINE if unavailable else ft.Colors.ON_SURFACE_VARIANT)
+                            color=unavailableCol if unavailable else track_authorCol)
                 ], spacing=track_cell[3])
             ]),
             padding=track_cell[4],
@@ -1609,8 +1666,7 @@ def App(page: ft.Page):
                         ft.PopupMenuItem(content=ft.Text("Добавить в очередь"), on_click=functools.partial(_on_add_to_queue_click, path, None),
                         ),
                         *([ft.PopupMenuItem(content=ft.Text("Добавить в избранное"), on_click=lambda e, p=path: (
-                            ui_utils.add_track_to_playlist(p, 2),
-                            playlist_ui(page, playlist_list, play_btn, 2),)),]
+                            ui_utils.add_to_playlists_bg(page, p, [2], show_after=2),)),]
                             if playlist_idl != 2
                             else []
                         ),
@@ -1634,9 +1690,9 @@ def App(page: ft.Page):
                     padding=track_cell[4],
                     height=track_cell[5],
                     margin=playlist_vlist.cell_margin(),
-                    bgcolor=ft.Colors.INVERSE_SURFACE,
+                    bgcolor=dragBGCol,
                     border_radius=track_border_radius,
-                    opacity=0.8
+                    opacity=dragOp
                 )
             )
         )
@@ -1699,12 +1755,12 @@ def App(page: ft.Page):
             card_border = ft.Container(
                 content=ft.Image(
                     src=img,
-                    width=50,
-                    height=50,
+                    width=playlist_cardSize,
+                    height=playlist_cardSize,
                     fit="cover"
                 ),
                 tooltip=name,
-                border_radius=12,
+                border_radius=playlist_cardRadius,
                 border=ft.Border.all(2, ft.Colors.TRANSPARENT),
             )
 
@@ -1740,16 +1796,16 @@ def App(page: ft.Page):
                 content_when_dragging=ft.Container(
                     content=ft.Text(f"Плейлист: {name}", size=12),
                     padding=8,
-                    bgcolor=ft.Colors.INVERSE_SURFACE,
-                    border_radius=12,
-                    opacity=0.8
+                    bgcolor=dragBGCol,
+                    border_radius=playlist_cardRadius,
+                    opacity=dragOp
                 )
             )
 
         # --- Приём drop'а ---
             if p_id >= 2:
                 def on_album_will_accept(e, container=card_border):
-                    container.border = ft.Border.all(2, ft.Colors.BLUE_ACCENT)
+                    container.border = ft.Border.all(2, dropCol)
                     container.update()
 
                 def on_album_leave(e, container=card_border):
@@ -1786,10 +1842,10 @@ def App(page: ft.Page):
                     if path_to_add is None:
                         return
 
-                    ui_utils.add_track_to_playlist(path_to_add, target_playlist_id)  # insert_at=None -> в конец
-
-                    if playlist_id == target_playlist_id:
-                        playlist_ui(page, playlist_list, play_btn, target_playlist_id)
+                    # в конец; перерисуем по окончании, если этот плейлист сейчас открыт
+                    ui_utils.add_to_playlists_bg(
+                        page, path_to_add, [target_playlist_id],
+                        show_after=target_playlist_id if playlist_id == target_playlist_id else None)
 
                 item = ft.DragTarget(
                     group="queue_drag",
@@ -1818,8 +1874,8 @@ def App(page: ft.Page):
             spacing = 5,
             controls=[
                 playlist_data,
-                ft.Container( # строка с альбомами 
-                    height=50,
+                ft.Container( # строка с альбомами
+                    height=playlist_cardSize,
                     # bgcolor=ft.Colors.RED_900,
                     content=albums_row
                 ),
@@ -1859,11 +1915,11 @@ def App(page: ft.Page):
 
     explorer_loading = ft.Image(
         src="assets/icons/loading_ico.png",
-        width=100,
-        height=100,
+        width=explorer_loadingSize,
+        height=explorer_loadingSize,
         fit="contain",
         visible=False,          # показываем только на время сетевого запроса
-        opacity=0.85,
+        opacity=explorer_loadingOp,
         animate_opacity=200,
     )
 
@@ -2018,10 +2074,10 @@ def App(page: ft.Page):
     # равно сдвигает (перетаскиванием), а on_change не присылает — откатить нечем, и
     # переключатель застревает на «Сервер» над локальной папкой. Поэтому всегда включён,
     # откат делает on_change_explorer_status, а недоступность видна по серому тексту.
-    server_segment_text = ft.Text("Сервер", color=ft.Colors.OUTLINE)
+    server_segment_text = ft.Text("Сервер", color=unavailableCol)
 
     def _set_server_segment(online: bool):
-        server_segment_text.color = None if online else ft.Colors.OUTLINE
+        server_segment_text.color = None if online else unavailableCol
 
     mode_explorer_status_button = ft.CupertinoSlidingSegmentedButton(
         selected_index=0,
@@ -2133,9 +2189,7 @@ def App(page: ft.Page):
                                 border_radius=UBOX_b_radius,
                                 
                                 #Стеклянный эффект
-                                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
-                                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
-                                blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                **box_style('UBOX Settings'), # фон, рамка, размытие — из ui_config.txt
 
                                 padding=5,
                                 expand=1,
@@ -2164,9 +2218,7 @@ def App(page: ft.Page):
                                     #     opacity=0.8                      # Можно настроить прозрачность самой текстуры
                                     # ),
                                     #Стеклянный эффект
-                                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
-                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
-                                    blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                    **box_style('LBOX Settings'), # фон, рамка, размытие — из ui_config.txt
 
                                     content=ft.Column(
                                         spacing=0,
@@ -2186,9 +2238,7 @@ def App(page: ft.Page):
                                     expand=5,
 
                                     #Стеклянный эффект
-                                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
-                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
-                                    blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                    **box_style('CBOX Settings'), # фон, рамка, размытие — из ui_config.txt
 
                                     content=ft.Column(
                                         spacing=0,
@@ -2218,9 +2268,7 @@ def App(page: ft.Page):
                                     #bgcolor=ft.Colors.RED_800, 
                                     border_radius=RBOX_b_radius, 
                                     #Стеклянный эффект
-                                    bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
-                                    border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
-                                    blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                    **box_style('RBOX Settings'), # фон, рамка, размытие — из ui_config.txt
                                     padding=5, 
                                     expand=2,
                                     
@@ -2244,9 +2292,7 @@ def App(page: ft.Page):
                                 border_radius=DBOX_b_radius,
 
                                 #Стеклянный эффект
-                                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.WHITE), # Полупрозрачный белый
-                                border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)), # Тонкая рамка
-                                blur=ft.Blur(sigma_x=1.5, sigma_y=1.5, tile_mode=ft.BlurTileMode.CLAMP), # Размытие заднего плана
+                                **box_style('DBOX Settings'), # фон, рамка, размытие — из ui_config.txt
                                  
                                 content=ft.Row(
                                     spacing=10, # Расстояние между элементами внутри
@@ -2349,7 +2395,7 @@ def App(page: ft.Page):
                                                                     padding=0,
                                                                     expand=6,
                                                                     content=ft.Slider(
-                                                                        thumb_color=ft.Colors.INDIGO_800,
+                                                                        thumb_color=sliderThumbCol,
                                                                         min=0,
                                                                         max=100,
                                                                         value=start_vol_val,
@@ -2393,8 +2439,22 @@ def App(page: ft.Page):
     )
     playlist_ui(page, playlist_list, play_btn, playlist_idl=2)
 
+    def on_cover_full(topic, message):
+        """Большая обложка серверного трека догрузилась в фоне (см. load_track)."""
+        if message["uri"] == ui_utils.current_uri:
+            track_cover.src = message["cover"]
+            track_cover.update()
+
+    def on_playlist_changed(topic, message):
+        """add_to_playlists_bg закончил запись — перерисовать нужный плейлист."""
+        if message.get("show") is not None:
+            playlist_ui(page, playlist_list, play_btn, message["show"])
+
     def on_tags_changed(topic, message):
         track_title.value = message.get("Название", "Неизвестно")
+        # иконку кнопки ставим здесь, а не в load_track: тот бывает в фоновом потоке
+        if "playing" in message:
+            play_btn.src = "assets/icons/pause_ico_inac.png" if message["playing"] else "assets/icons/play_ico_inac.png"
         track_artist.value = message.get("Автор", "Неизвестный исполнитель")
         track_album.value = message.get("Альбом", "")
         track_year.value = message.get("Год", "")
@@ -2469,6 +2529,8 @@ def App(page: ft.Page):
     page.pubsub.subscribe_topic("player_state", on_player_state)
     page.pubsub.subscribe_topic("player_notice", on_player_notice)
     page.pubsub.subscribe_topic("queue_head_changed", on_queue_head_changed)
+    page.pubsub.subscribe_topic("cover_full", on_cover_full)
+    page.pubsub.subscribe_topic("playlist_changed", on_playlist_changed)
     page.pubsub.subscribe_topic("tags_update", on_tags_changed)
     page.pubsub.subscribe_topic("playback_update", on_playback_update)
 
@@ -2482,6 +2544,8 @@ def App(page: ft.Page):
         page.pubsub.unsubscribe_topic("player_state", on_player_state)
         page.pubsub.unsubscribe_topic("player_notice", on_player_notice)
         page.pubsub.unsubscribe_topic("queue_head_changed", on_queue_head_changed)
+        page.pubsub.unsubscribe_topic("cover_full", on_cover_full)
+        page.pubsub.unsubscribe_topic("playlist_changed", on_playlist_changed)
         page.pubsub.unsubscribe_topic("dir_loading", on_dir_loading)
 
     page.on_disconnect = handle_disconnect

@@ -116,7 +116,9 @@ def on_item_click(e, open_dir, play_btn_obj): #при клике на объек
             open_dir(uri)
         else:
             tags = src.meta(uri)
-            miniature = src.cover(uri, "50")
+            # серверную миниатюру дотянет cover_worker при отрисовке строки (cov_bytes NULL) —
+            # иначе HTTP-запрос задерживал бы старт трека
+            miniature = None if src.is_remote else src.cover(uri, "50")
 
             try:
                 with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
@@ -266,30 +268,38 @@ def load_track(page, uri, play_btn_obj, idx): #через проводник
     known_duration = src.duration(uri) or 0
     track_gen += 1
 
+    # Кнопку play_btn_obj здесь не трогаем: load_track вызывается и из фонового потока
+    # (автопереход), а оттуда изменения контролов до клиента не доходят. Иконку ставит
+    # on_tags_changed по полю "playing". Параметр оставлен, чтобы не менять вызовы.
     if player:
         player.stop()
         player.set_mrl(mrl)
-        if autoplayswitch == False:
+        will_play = not autoplayswitch
+        if will_play:
             player.play()
-            play_btn_obj.src = "assets/icons/pause_ico_inac.png"
-            is_paused = False
-        else: 
-            play_btn_obj.src = "assets/icons/play_ico_inac.png"
-            is_paused = False
-        play_btn_obj.update()
+        is_paused = False
     else:
         player = utils.create_player(mrl, start_vol_val)
         time.sleep(0.5)
-        #vol_slider.set(self.player.audio_get_volume())
-        #vol_label.configure(text=f"{self.player.audio_get_volume()}%")
         player.play()
+        will_play = True
         is_paused = False
-        play_btn_obj.src = "assets/icons/pause_ico_inac.png"
-        play_btn_obj.update()
     tags = src.meta(uri)
     details = src.details(uri)
-    tags["cover"] = src.cover(uri, "full")
+    if src.is_remote:
+        # большая обложка — отдельный HTTP-запрос на сотни КБ: на медленной сети теги
+        # ждали бы её. Показываем теги сразу, обложку пришлёт фон через 'cover_full'
+        tags["cover"] = None
+        gen = track_gen
+        def fetch_cover():
+            cover = src.cover(uri, "full")
+            if cover and gen == track_gen:   # пока качали, трек не сменился
+                page.pubsub.send_all_on_topic("cover_full", {"uri": uri, "cover": cover})
+        threading.Thread(target=fetch_cover, daemon=True).start()
+    else:
+        tags["cover"] = src.cover(uri, "full")
     tags["idx"] = idx
+    tags["playing"] = will_play
     page.pubsub.send_all_on_topic("tags_update", tags)
     # очистка истории < max_histlen
     try:
@@ -441,6 +451,28 @@ def add_track_to_playlist(uri, playlist_id, insert_at=None):
 
     except sqlite3.Error as e:
         logger.error(f"Ошибка БД при добавлении в плейлист: {e}")
+
+_playlist_lock = threading.Lock()   # два добавления в один плейлист не должны перемешать позиции
+
+def add_to_playlists_bg(page, uri, playlist_ids, show_after=None):
+    """Добавить uri (трек или папку) в один или несколько плейлистов — в фоне.
+
+    Для папки add_track_to_playlist читает теги и обложку каждого файла: 225 треков —
+    около 3 с даже с прогретого диска, с холодного HDD в разы дольше. Раньше это шло
+    прямо в обработчике клика. По окончании — 'playlist_changed': UI перерисует
+    плейлист show_after (None — ничего не перерисовывать)."""
+    def work():
+        try:
+            for pid in playlist_ids:
+                with _playlist_lock:
+                    add_track_to_playlist(uri, pid)
+        except Exception as ex:
+            logger.exception(f"Добавление {uri} в плейлисты {playlist_ids}: {ex}")
+        try:
+            page.pubsub.send_all_on_topic("playlist_changed", {"show": show_after})
+        except RuntimeError:
+            pass   # окно уже закрыто
+    threading.Thread(target=work, daemon=True).start()
 
 def add_playlist_to_queue(playlist_id, insert_at=None):
     # 1. Получаем список треков из основной БД

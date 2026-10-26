@@ -55,7 +55,10 @@ class LocalSource:
         return out
 
     def list_dir(self, folder_path: str):#анализ текущей папки (выбранной)
-        path = Path(folder_path)
+        # Всегда абсолютный путь: иначе от start_path = ./music в БД попадали относительные
+        # 'music\used\a.mp3', а через крошки тот же файл — абсолютный. Два URI на файл
+        # ломали проверку дублей в плейлистах, а у .exe (другая рабочая папка) — и поиск файла
+        path = Path(os.path.abspath(folder_path))
         if not path.exists() or not path.is_dir():
             return []
         folders = []
@@ -176,7 +179,7 @@ class LocalSource:
         return Path(uri).is_dir()
 
     def expand(self, uri):
-        path = Path(uri)
+        path = Path(os.path.abspath(uri))   # см. list_dir: только абсолютные URI
         files = []
         pattern = path.rglob('*') if idxDirrs else path.iterdir()
 
