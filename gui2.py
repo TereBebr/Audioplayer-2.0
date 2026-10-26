@@ -879,12 +879,8 @@ def App(page: ft.Page):
                 return
             target_pos = row[0]
 
+            # при target_pos == 0 трек загрузит on_queue_head_changed, когда воркер его вставит
             await on_files_dropped(src_data, insert_at=target_pos)
-
-            if target_pos == 0:
-                new_track = ui_utils.db_query_one('queue.db', "SELECT path FROM queue WHERE id = 0")
-                if new_track:
-                    ui_utils.load_track(page, new_track[0], play_btn, -2)
             return
 
         # ==========================================
@@ -2018,6 +2014,15 @@ def App(page: ft.Page):
         except (RuntimeError, AssertionError):
             pass
 
+    # Сегмент «Сервер» НЕ блокируем через disabled: заблокированный сегмент ползунок всё
+    # равно сдвигает (перетаскиванием), а on_change не присылает — откатить нечем, и
+    # переключатель застревает на «Сервер» над локальной папкой. Поэтому всегда включён,
+    # откат делает on_change_explorer_status, а недоступность видна по серому тексту.
+    server_segment_text = ft.Text("Сервер", color=ft.Colors.OUTLINE)
+
+    def _set_server_segment(online: bool):
+        server_segment_text.color = None if online else ft.Colors.OUTLINE
+
     mode_explorer_status_button = ft.CupertinoSlidingSegmentedButton(
         selected_index=0,
         expand=True,
@@ -2025,7 +2030,7 @@ def App(page: ft.Page):
         on_change=on_change_explorer_status,
         controls=[
             ft.Text("Локальный"),
-            ft.Text("Сервер"),
+            server_segment_text,
         ],
     )
 
@@ -2447,8 +2452,14 @@ def App(page: ft.Page):
             play_btn.visible = True
             play_btn.src = "assets/icons/play_ico_inac.png"
             rebuild_queue_ui()
+        if message.get("playing"):   # перемотка запустила остановленный трек
+            play_btn.src = "assets/icons/pause_ico_inac.png"
         play_spinner.update()
         play_btn.update()
+
+    def on_queue_head_changed(topic, message):
+        """queue_worker вставил трек на id 0 — на место играющего. Загружаем его."""
+        ui_utils.load_track(page, message["path"], play_btn, -2)
 
     def on_player_notice(topic, message):
         """Короткое сообщение внизу окна: повтор, пропуск трека, остановка."""
@@ -2457,6 +2468,7 @@ def App(page: ft.Page):
     # Регистрация подписчиков по топикам
     page.pubsub.subscribe_topic("player_state", on_player_state)
     page.pubsub.subscribe_topic("player_notice", on_player_notice)
+    page.pubsub.subscribe_topic("queue_head_changed", on_queue_head_changed)
     page.pubsub.subscribe_topic("tags_update", on_tags_changed)
     page.pubsub.subscribe_topic("playback_update", on_playback_update)
 
@@ -2469,6 +2481,7 @@ def App(page: ft.Page):
         page.pubsub.unsubscribe_topic("search_ready", on_search_ready)
         page.pubsub.unsubscribe_topic("player_state", on_player_state)
         page.pubsub.unsubscribe_topic("player_notice", on_player_notice)
+        page.pubsub.unsubscribe_topic("queue_head_changed", on_queue_head_changed)
         page.pubsub.unsubscribe_topic("dir_loading", on_dir_loading)
 
     page.on_disconnect = handle_disconnect
@@ -2476,7 +2489,7 @@ def App(page: ft.Page):
     def on_server_status(topic, message):
         """Сервер появился или пропал — гасим/включаем сегмент «Сервер»."""
         online = message.get("online")
-        mode_explorer_status_button.disabled = not online
+        _set_server_segment(online)
         if online:
             ui_utils.failed_uris.clear()   # сервер вернулся — пропущенные треки снова не серые
         rebuild_queue_ui()
@@ -2493,7 +2506,7 @@ def App(page: ft.Page):
 
     page.pubsub.subscribe_topic("server_status", on_server_status)
     # сегмент «Сервер» неактивен, пока первый ping не подтвердит доступность
-    mode_explorer_status_button.disabled = True
+    _set_server_segment(False)
     sources.start_server_watch(page)
     cover_worker.start_cover_worker(page)
     queue_worker.start_queue_worker(page)

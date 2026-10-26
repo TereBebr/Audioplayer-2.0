@@ -97,6 +97,11 @@ def start_queue_worker(page):
                             "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
                             (target_id, name, author, track_uri, miniature))
                         con_queue.commit()
+                    if target_id == 0:
+                        # трек встал на место играющего — UI должен его загрузить. Раньше
+                        # это делал сам обработчик drop сразу после add_queue, но вставка
+                        # асинхронная: в тот момент на id 0 было пусто или старый трек
+                        page.pubsub.send_all_on_topic("queue_head_changed", {"path": track_uri})
 
                 except Exception as e:
                     logger.error(f"Ошибка загрузки {track_uri}: {e}")

@@ -210,10 +210,24 @@ def slider_on_dragging(e: ft.ControlEvent, time_label): #чтоб не дерг�
     is_dragging = True
 
 def slider_event(e: ft.ControlEvent, time_label):
-    global curr_sec, is_dragging
+    global curr_sec, is_dragging, is_paused
     if player:
         sec = int(e.control.value)
-        player.set_time(sec * 1000)
+        if player.get_state() in (vlc.State.Stopped, vlc.State.Ended, vlc.State.NothingSpecial):
+            # у остановленного трека set_time не действует: запускаем и перематываем,
+            # когда VLC реально начнёт играть (в фоне, чтобы не держать UI)
+            player.play()
+            is_paused = False
+            e.page.pubsub.send_all_on_topic("player_state", {"playing": True})
+            def seek_when_ready(ms=sec * 1000):
+                for _ in range(40):
+                    if player.is_playing():
+                        player.set_time(ms)
+                        return
+                    time.sleep(0.05)
+            threading.Thread(target=seek_when_ready, daemon=True).start()
+        else:
+            player.set_time(sec * 1000)
 
         time_label.value = f"{sec // 60:02d}:{sec % 60:02d}"
         time_label.update()
@@ -669,6 +683,16 @@ def bg_ui_process(page: ft.Page, play_btn):
                 send("queue_advanced", 1)
             return path
 
+        def stop_at_end():
+            """Очередь кончилась: трек остаётся загруженным, стоит в начале, кнопка «Play».
+            Раньше VLC оставался в Ended — Play/перемотка на него не действовали."""
+            global curr_sec, is_paused
+            player.stop()
+            is_paused = True
+            curr_sec = 0
+            send("playback_update", {"curr_sec": 0, "total_sec": total_sec})
+            send("player_state", {"stopped": True})
+
         def track_failed(reason):
             """Трек не играет: повторить (только серверный) или пропустить."""
             global is_paused
@@ -699,7 +723,7 @@ def bg_ui_process(page: ft.Page, play_btn):
             send("player_notice", {"text": "Трек недоступен, пропущен"})
             if not go_next():
                 set_spinner(False)
-                send("player_state", {"stopped": True})
+                stop_at_end()
 
         while True:
             try:
@@ -780,8 +804,8 @@ def bg_ui_process(page: ft.Page, play_btn):
                         track_failed("не открылся")
                     elif sources.is_remote(current_uri) and length_ms and last_pos < length_ms - CUT_MARGIN_MS:
                         track_failed(f"обрыв на {last_pos // 1000} с из {length_ms // 1000}")
-                    else:
-                        go_next()
+                    elif not go_next():
+                        stop_at_end()
 
                 elif state in (vlc.State.Paused, vlc.State.Stopped, vlc.State.NothingSpecial):
                     loading_since = stall_since = None
