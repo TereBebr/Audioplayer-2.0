@@ -23,7 +23,7 @@ class Config:
     auto_rescan_minutes: int
     host: str
     port: int
-    token: str | None
+    tokens: dict            # имя -> токен; пусто — сервер открыт для всех
 
 
 def _abs(base: Path, value: str) -> Path:
@@ -38,7 +38,18 @@ def load_config(ini_path: Path = INI_PATH) -> Config:
     cp.read(ini_path, encoding="utf-8")
     base = ini_path.resolve().parent
 
-    token = cp.get("Server", "token", fallback="").strip()
+    # [Tokens]: «имя = токен», по строке на человека. Удалить строку — отозвать доступ.
+    # configparser приводит имена к нижнему регистру — в логе будут «sasha», не «Sasha»
+    tokens = {}
+    if cp.has_section("Tokens"):
+        for name, value in cp.items("Tokens"):
+            if value.strip():
+                tokens[name] = value.strip()
+    # Старый одиночный [Server] token продолжает работать — под именем owner
+    legacy = cp.get("Server", "token", fallback="").strip()
+    if legacy and legacy not in tokens.values():
+        tokens.setdefault("owner", legacy)
+
     return Config(
         root=_abs(base, cp.get("Library", "root", fallback="./music")),
         covers_dir=_abs(base, cp.get("Library", "covers_dir", fallback="./covers")),
@@ -47,5 +58,5 @@ def load_config(ini_path: Path = INI_PATH) -> Config:
         auto_rescan_minutes=cp.getint("Index", "auto_rescan_minutes", fallback=0),
         host=cp.get("Server", "host", fallback="127.0.0.1"),
         port=cp.getint("Server", "port", fallback=8000),
-        token=token or None,
+        tokens=tokens,
     )

@@ -128,12 +128,15 @@
 серии неудач), `RemoteSource._get` не ходит в сеть при `enabled = False` и когда опрос знает,
 что сервера нет. `.exe` собирается (`build.ps1`) и запускается.
 
-**7.6 Токен — ✅.** `server.ini` → `[Server] token`, тот же — в `config.txt` плеера.
-Не задан — сервер открыт, как раньше. Задан — middleware `check_token` в `server.py` требует
-`Authorization: Bearer <token>` на всех путях, включая `/docs`. Стрим VLC заголовок не шлёт,
-поэтому `RemoteSource.mrl` добавляет `?s=<stream_sig>` — HMAC от токена и id трека
-(`stream_sig` — две копии, `server.py` и `sources.py`). Неверный токен в логе плеера —
-«401: токен в config.txt не совпадает с server.ini».
+**7.6 Токены — ✅.** `server.ini` → `[Tokens]`: «имя = токен», по строке на человека;
+старый одиночный `[Server] token` тоже работает (имя `owner`). Ни одного токена — сервер
+открыт. Свой токен человек вписывает в `config.txt` плеера, `[Server] token`. Отозвать —
+удалить строку и `systemctl restart musicserver`. Middleware `check_token` (`server.py`)
+требует `Authorization: Bearer <token>` на всех путях, включая `/docs`; стрим VLC заголовок
+не шлёт, поэтому `RemoteSource.mrl` добавляет `?s=<stream_sig>` — HMAC от токена и id трека
+(`stream_sig` — две копии, `server.py` и `sources.py`). В `journalctl -u musicserver`:
+«sasha слушает трек 42». Неверный токен в логе плеера — «401: токен в config.txt не
+совпадает с server.ini».
 
 Сервер живёт на Pi (Armbian) в `/root/musicserver`, systemd-юнит `musicserver`, музыка —
 `/mnt/hdd/music` (NTFS, `ntfs3`). Снаружи — через Tailscale, имя `musicpi`.

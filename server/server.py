@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 import hashlib
 import hmac
+import logging
 from pathlib import Path
 from contextlib import closing
 import threading
@@ -15,6 +16,8 @@ app = FastAPI()
 
 cfg = load_config()
 db.init_db(cfg.db_path)
+# логгер uvicorn: его вывод попадает в journalctl, а корневой логгер тут не настроен
+log = logging.getLogger("uvicorn.error")
 
 
 def stream_sig(token: str, track_id) -> str:
@@ -27,23 +30,35 @@ def stream_sig(token: str, track_id) -> str:
     return hmac.new(token.encode(), f"stream:{track_id}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
+def who_is(request: Request) -> str | None:
+    """Имя из [Tokens], чей токен пришёл с запросом, или None.
+    Заголовок Authorization: Bearer <token>; у стрима — ещё и ?s=<stream_sig> (так ходит VLC)."""
+    # bytes, а не str: compare_digest падает на не-ASCII строках, а заголовок
+    # может прислать кто угодно
+    auth = request.headers.get("authorization", "").encode()
+    path = request.url.path
+    stream_id = path.rsplit("/", 1)[-1] if path.startswith("/server/stream/") else None
+    sig = request.query_params.get("s", "").encode()
+    for name, token in cfg.tokens.items():
+        if hmac.compare_digest(auth, f"Bearer {token}".encode()):
+            return name
+        if stream_id is not None and hmac.compare_digest(sig, stream_sig(token, stream_id).encode()):
+            return name
+    return None
+
+
 @app.middleware("http")
 async def check_token(request: Request, call_next):
-    """Токен из server.ini, [Server] token. Не задан — сервер открыт, как раньше.
-    Задан — каждый запрос с заголовком Authorization: Bearer <token>,
-    стрим — либо с ним же, либо с ?s=<stream_sig> (так ходит VLC)."""
-    if cfg.token:
-        # bytes, а не str: compare_digest падает на не-ASCII строках, а заголовок
-        # может прислать кто угодно
-        ok = hmac.compare_digest(request.headers.get("authorization", "").encode(),
-                                 f"Bearer {cfg.token}".encode())
-        path = request.url.path
-        if not ok and path.startswith("/server/stream/"):
-            track_id = path.rsplit("/", 1)[-1]
-            ok = hmac.compare_digest(request.query_params.get("s", "").encode(),
-                                     stream_sig(cfg.token, track_id).encode())
-        if not ok:
+    """Токены из server.ini ([Tokens] и старый [Server] token). Нет ни одного —
+    сервер открыт, как раньше. Есть — запрос без своего токена получает 401."""
+    if cfg.tokens:
+        who = who_is(request)
+        if who is None:
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        path = request.url.path
+        # кто что слушает: только первый запрос трека, а не каждый кусок при перемотке
+        if path.startswith("/server/stream/") and request.headers.get("range", "bytes=0-").startswith("bytes=0-"):
+            log.info("%s слушает трек %s", who, path.rsplit("/", 1)[-1])
     return await call_next(request)
 
 # из конфига ===========
