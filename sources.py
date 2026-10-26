@@ -12,6 +12,8 @@ import utils
 from tinytag import TinyTag
 import requests
 import search_rank
+import hashlib
+import hmac
 from requests.exceptions import RequestException
 import time
 import threading
@@ -369,6 +371,15 @@ class LocalSource:
         found.sort(key=lambda item: (search_rank.rank(query, item["name"]), item["path"].casefold()))
         return found[:self.SEARCH_LIMIT]
 
+def stream_sig(token: str, track_id) -> str:
+    """Подпись ссылки на стрим одного трека: HMAC(token, "stream:<id>").
+
+    VLC не умеет слать заголовок Authorization, поэтому для /server/stream/{id}
+    в ссылку кладётся ?s=<подпись>, а не сам токен. Попади ссылка в лог — по ней
+    можно скачать только этот трек, и токен из неё не восстановить.
+    Две одинаковые копии: server/server.py и sources.py — менять обе."""
+    return hmac.new(token.encode(), f"stream:{track_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
 class RemoteUnavailable(Exception):
     """Сервер недоступен или произошла сетевая ошибка."""
     pass
@@ -480,6 +491,9 @@ class RemoteSource:
             if not probe:
                 _wake.set()   # пусть опрос проверит сервер прямо сейчас
             raise RemoteUnavailable(f"Сервер недоступен [{url}]: {err}") from err
+        if r.status_code == 401:
+            # отдельное сообщение: иначе неверный токен выглядит как «сервер недоступен»
+            raise RemoteUnavailable(f"{url} -> 401: токен в config.txt не совпадает с server.ini")
         if r.status_code in (404, 410):
             raise RemoteNotFound(f"{url} -> {r.status_code}")
         if not r.ok:
@@ -587,7 +601,11 @@ class RemoteSource:
 
     def mrl(self, uri):
         track_id = self._parse(uri)[1]
-        return f"{SRV_BASE_URL}/server/stream/{track_id}"
+        url = f"{SRV_BASE_URL}/server/stream/{track_id}"
+        if SRV_TOKEN:
+            # VLC заголовок не пошлёт — подпись в ссылке (см. stream_sig)
+            url += f"?s={stream_sig(SRV_TOKEN, track_id)}"
+        return url
 
     def is_dir(self, uri):
         try:

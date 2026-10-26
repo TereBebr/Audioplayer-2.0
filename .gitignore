@@ -16,3 +16,4 @@ server/covers/
 docs/server/uv.log
 server/library.db*
 docs/BACKLOG.md
+config.txt

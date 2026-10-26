@@ -1,5 +1,7 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+import hashlib
+import hmac
 from pathlib import Path
 from contextlib import closing
 import threading
@@ -13,6 +15,36 @@ app = FastAPI()
 
 cfg = load_config()
 db.init_db(cfg.db_path)
+
+
+def stream_sig(token: str, track_id) -> str:
+    """Подпись ссылки на стрим одного трека: HMAC(token, "stream:<id>").
+
+    VLC не умеет слать заголовок Authorization, поэтому для /server/stream/{id}
+    в ссылку кладётся ?s=<подпись>, а не сам токен. Попади ссылка в лог — по ней
+    можно скачать только этот трек, и токен из неё не восстановить.
+    Две одинаковые копии: server/server.py и sources.py — менять обе."""
+    return hmac.new(token.encode(), f"stream:{track_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+@app.middleware("http")
+async def check_token(request: Request, call_next):
+    """Токен из server.ini, [Server] token. Не задан — сервер открыт, как раньше.
+    Задан — каждый запрос с заголовком Authorization: Bearer <token>,
+    стрим — либо с ним же, либо с ?s=<stream_sig> (так ходит VLC)."""
+    if cfg.token:
+        # bytes, а не str: compare_digest падает на не-ASCII строках, а заголовок
+        # может прислать кто угодно
+        ok = hmac.compare_digest(request.headers.get("authorization", "").encode(),
+                                 f"Bearer {cfg.token}".encode())
+        path = request.url.path
+        if not ok and path.startswith("/server/stream/"):
+            track_id = path.rsplit("/", 1)[-1]
+            ok = hmac.compare_digest(request.query_params.get("s", "").encode(),
+                                     stream_sig(cfg.token, track_id).encode())
+        if not ok:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 # из конфига ===========
 
