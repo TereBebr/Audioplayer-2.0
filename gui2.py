@@ -875,6 +875,27 @@ def App(page: ft.Page):
         if not advanced:
             rebuild_queue_ui()
 
+    # uri -> контейнеры обложек в видимых строках, которые ждут миниатюру.
+    # Заполняются при отрисовке окна (build_*_cell), сбрасываются перед следующей:
+    # строки прошлого окна уже не на экране. Миниатюру подставляет on_cover_ready —
+    # обновляется одна картинка, а не весь список
+    _cover_slots = {"queue": {}, "playlist": {}}
+
+    def cover_slot(kind, path, cov_bytes, unavailable):
+        """Обложка строки очереди/плейлиста. Нет миниатюры — нота и заявка в cover_worker."""
+        size = queue_cell[0]
+        if unavailable:
+            img = ft.Icon(ft.Icons.CLOUD_OFF, size=size, color=unavailableIconCol)
+        elif cov_bytes is not None:
+            img = ft.Image(src=cov_bytes, width=size, height=size)
+        else:
+            img = ft.Icon(ft.Icons.MUSIC_NOTE, size=size)
+        slot = ft.Container(content=img, width=size, height=size)
+        if cov_bytes is None and not unavailable:
+            _cover_slots[kind].setdefault(path, []).append(slot)
+            cover_worker.request_cover(path)
+        return slot
+
     # --- данные очереди для оконного рендера ---
     # Сортируем строго по ID, чтобы 0 (играющий сейчас) был всегда наверху
 
@@ -883,6 +904,7 @@ def App(page: ft.Page):
         return r[0] if r else 0
 
     def queue_fetch(offset, limit):
+        _cover_slots["queue"].clear()   # окно перерисовывается — старые строки не на экране
         return ui_utils.db_query_all('queue.db',
             """SELECT id, uid, name, author, path, cov_bytes FROM queue
                WHERE id >= 0 ORDER BY id ASC LIMIT ? OFFSET ?""", (limit, offset))
@@ -1095,12 +1117,7 @@ def App(page: ft.Page):
         border_color = playingCol if is_playing else ft.Colors.TRANSPARENT
         bg_color = queue_cellBGCol if not is_playing else queue_cellPlayingBGCol
 
-        # Попытка декодировать обложку (если она есть)
-        if cov_bytes is None:
-            cover_worker.request_cover(path)
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
-        else:
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+        cover_img = cover_slot("queue", path, cov_bytes, unavailable)
 
         item_content = ft.Container(
             content=ft.ContextMenu(
@@ -1540,6 +1557,7 @@ def App(page: ft.Page):
         return r[0] if r else 0
 
     def playlist_fetch(offset, limit):
+        _cover_slots["playlist"].clear()
         return ui_utils.db_query_all('app.db', """
             SELECT t.id, t.name, t.author, t.path, t.cov_bytes, pt.position
             FROM playlist_tracks pt
@@ -1612,9 +1630,9 @@ def App(page: ft.Page):
 
         # сервер выключен или трек не удалось сыграть (Э7) — рисуем серым
         unavailable = (sources.is_remote(path) and not sources.server_online()) or path in ui_utils.failed_uris
-        cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Icon(ft.Icons.MUSIC_NOTE, size=queue_cell[0])
-        if cov_bytes is not None:
-            cover_img = ft.Icon(ft.Icons.CLOUD_OFF, size=queue_cell[0], color=unavailableIconCol) if unavailable else ft.Image(src=cov_bytes, width=queue_cell[0], height=queue_cell[0])
+        # раньше миниатюру тут не запрашивали: серверный трек без обложки в app.db
+        # оставался с нотой, пока его не добавят в очередь (её строка просила обложку)
+        cover_img = cover_slot("playlist", path, cov_bytes, unavailable)
 
         # Сам контент трека. Здесь вешаем on_double_click
         item_content = ft.Container(
@@ -2122,15 +2140,17 @@ def App(page: ft.Page):
         except (RuntimeError, AssertionError):
             pass
 
-    _last_cover_rebuild = [0.0]
-
     def on_cover_ready(topic, message):
-        """Обложка дотянулась. Перерисовываем список не чаще раза в 0.5 с,
-        но последнюю (left == 0) показываем обязательно."""
-        now = time.time()
-        if message.get("left", 0) == 0 or now - _last_cover_rebuild[0] >= 0.5:
-            _last_cover_rebuild[0] = now
-            rebuild_queue_ui()
+        """Миниатюра дотянулась — подставляем её в видимые строки с этим uri.
+        Раньше тут перерисовывалась вся очередь (до двух раз в секунду, пока
+        грузятся обложки) — отсюда и подвисания при добавлении большой папки."""
+        for slots in _cover_slots.values():
+            for slot in slots.pop(message["uri"], ()):
+                slot.content = ft.Image(src=message["cov"], width=queue_cell[0], height=queue_cell[0])
+                try:
+                    slot.update()
+                except (RuntimeError, AssertionError):
+                    pass   # строку уже убрали с экрана
     
     # Клавиши -------------------
 

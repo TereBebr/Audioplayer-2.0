@@ -58,6 +58,7 @@ STALL_SEC = 1.0          # время не идёт столько секунд 
 # остаётся в Playing с замершим временем — без этого порога ждал бы вечно
 STALL_FAIL_SEC = config.getfloat('Server', 'stall_timeout', fallback=10.0)
 SPINNER_DELAY = 0.5      # индикатор загрузки показываем не сразу, чтобы не мигал
+TAGS_RETRY_SEC = 3       # как часто перезапрашивать теги, если при загрузке трека сервер не ответил
 
 current_uri = None       # что сейчас загружено в плеер
 known_duration = 0       # длительность из меты источника, секунд (0 — неизвестна)
@@ -251,6 +252,38 @@ def vol_slider_event(e, vol_label):
 
 #Логика воспроизведение аудио ----
 
+def _retry_tags(page, uri, gen):
+    """Теги серверного трека пришли заглушкой («сервер недоступен») — перезапрашиваем
+    в фоне, пока играет тот же трек. VLC сам доигрывает поток, когда сервер
+    вернулся, а теги без этого так и оставались заглушкой.
+
+    Ждём не события server_status: при быстром перезапуске сервера опрос может
+    вообще не заметить, что тот пропадал."""
+    def run():
+        global tags, details, known_duration
+        src = sources.get(uri)
+        while gen == track_gen:
+            time.sleep(TAGS_RETRY_SEC)
+            if gen != track_gen or not sources.server_online():
+                continue
+            new_tags = src.meta(uri)
+            if new_tags.get("_stub"):
+                continue
+            new_details = src.details(uri)
+            duration = src.duration(uri)
+            cover = src.cover(uri, "full")
+            if gen != track_gen:   # пока ходили на сервер, трек сменился
+                return
+            tags, details = new_tags, new_details
+            known_duration = known_duration or duration or 0
+            new_tags["cover"] = cover
+            new_tags["idx"] = -2   # без анимации скипа; "playing" нет — кнопку не трогаем
+            page.pubsub.send_all_on_topic("tags_update", new_tags)
+            logger.info(f"{uri}: теги получены после восстановления связи")
+            return
+    threading.Thread(target=run, daemon=True).start()
+
+
 def load_track(page, uri, play_btn_obj, idx): #через проводник
     global player, tags, details, tec_audio_info_num, curr_sec, total_sec, is_paused
     global current_uri, known_duration, track_gen
@@ -301,6 +334,8 @@ def load_track(page, uri, play_btn_obj, idx): #через проводник
     tags["idx"] = idx
     tags["playing"] = will_play
     page.pubsub.send_all_on_topic("tags_update", tags)
+    if src.is_remote and tags.get("_stub"):
+        _retry_tags(page, uri, track_gen)
     # очистка истории < max_histlen
     try:
         with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:

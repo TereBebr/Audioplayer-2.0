@@ -6,7 +6,6 @@ import sources
 import time
 import logging
 from collections import Counter
-import cover_worker
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +13,8 @@ tracks_queue = queue.Queue()
 in_progress = Counter()
 in_progress_lock = threading.Lock()
 db_lock = threading.Lock()
+
+PROGRESS_SEC = 1.0   # прогресс (и перерисовка очереди) не чаще раза в столько секунд
 
 def request_track(uri, insert_at=None):
     """Поставить трек в очередь на дозагрузку"""
@@ -51,13 +52,17 @@ def request_track(uri, insert_at=None):
             curr_pos += 1
 
 def start_queue_worker(page):
-    """Фоновый поток: берёт URI из очереди, тянет cover(uri, '50'),
-    пишет в БД, шлёт 'cover_ready' с uid строки."""
+    """Фоновый поток: берёт URI из очереди, читает теги, вставляет строку
+    в queue.db, шлёт 'queue_progress' (и 'queue_head_changed' для id 0)."""
     def run():
         processed_count = 0
         last_sent = [0.0]
         with closing(sqlite3.connect('queue.db', timeout=10.0)) as con_queue:
             con_queue.execute("PRAGMA journal_mode=WAL;")
+            # Коммит на каждый трек, но без fsync: в WAL с NORMAL база не бьётся,
+            # при отключении питания теряются только последние вставки. С FULL
+            # большой альбом вставлялся секундами
+            con_queue.execute("PRAGMA synchronous=NORMAL;")
             while True:
                 # get() ДО любых проверок: на первой итерации track_uri ещё не существует,
                 # и обращение к нему убивало поток молча — NameError вне try/except
@@ -78,13 +83,10 @@ def start_queue_worker(page):
                         continue
                     name = tags["Название"]
                     author = tags.get("Автор") or "Неизвестно"
-                    if src.is_remote:
-                        # request_cover ничего не возвращает: обложку дотянет
-                        # cover_worker и сам впишет её в queue.db
-                        miniature = None
-                        cover_worker.request_cover(track_uri)
-                    else:
-                        miniature = src.cover(track_uri, "50")
+                    # Обложку здесь не тянем: на 1000 треков это 1000 HTTP-запросов
+                    # (или разборов картинки), а видно из них штук 15. Миниатюру
+                    # попросит сама строка очереди, когда появится на экране
+                    # (build_queue_cell -> cover_worker.request_cover)
 
                     with db_lock: # Вставка в конец
                         cursor = con_queue.cursor() 
@@ -94,8 +96,8 @@ def start_queue_worker(page):
                         else: # Вставка по индексу
                             target_id = item_insert_at
                         cursor.execute(
-                            "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, ?)",
-                            (target_id, name, author, track_uri, miniature))
+                            "INSERT INTO queue (id, name, author, path, cov_bytes) VALUES (?, ?, ?, ?, NULL)",
+                            (target_id, name, author, track_uri))
                         con_queue.commit()
                     if target_id == 0:
                         # трек встал на место играющего — UI должен его загрузить. Раньше
@@ -112,10 +114,10 @@ def start_queue_worker(page):
                         if in_progress[track_uri] <= 0:
                             del in_progress[track_uri]
                         left_to_process = sum(in_progress.values())
-                    # Не чаще раза в 0.3 с — иначе на тысяче треков UI захлебнётся
-                    # перерисовками. Последнее сообщение (left == 0) шлём всегда.
+                    # Не чаще раза в PROGRESS_SEC — каждое сообщение перерисовывает
+                    # очередь. Последнее сообщение (left == 0) шлём всегда.
                     now = time.time()
-                    due = (now - last_sent[0] >= 0.3) or left_to_process == 0
+                    due = (now - last_sent[0] >= PROGRESS_SEC) or left_to_process == 0
                     if due:
                         last_sent[0] = now
                         page.pubsub.send_all_on_topic("queue_progress", 
