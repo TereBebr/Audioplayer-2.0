@@ -133,12 +133,27 @@ b_blur = 1.5
 
 
 
-
-[UI adress_bar] ; точечная настройка дизайна адресной строки
+[UI host_settings_button] ; точечная настройка дизайна кнопки настроек хоста
 
 ; ВАЖНО у HEX цветов формат #6A5ACD - 6 символов после #, если в вашем HEX цвете 8 символов (#BB5A225C), то 
 ; последние 2 отвечают за прозрачность, у меня прозрачность задается отдельно так что их нужно УБРАТЬ
 
+; Цвет иконки в #HEX формате (16рич.)
+host_settings_button_Col = #3c3e40
+
+; Цвет фона в #HEX формате (16рич.)
+host_settings_button_BGcol = #146ba6
+
+; Цвет рамки (обводки) кнопки настроек хоста
+host_settings_button_Bcol = #ededed
+
+; Толщина рамки (обводки) кнопки настроек хоста
+host_settings_button_Btol = 1.5
+
+; Сила скругления углов кнопки настроек хоста
+host_settings_button_Radius = 8
+
+[UI adress_bar] ; точечная настройка дизайна адресной строки
 
 ; Цвет фона строки в #HEX формате (16рич.)
 adress_barBGCol = #3c3e40
@@ -363,3 +378,31 @@ playlist_cardRadius = 12
 ; Заглушка обложки в окне «Выберите альбомы»: фон и скругление. По стандарту bluegrey700 и 5
 dialog_albumTileBGCol = bluegrey700
 dialog_albumTileRadius = 5
+
+[UI server] ; экран «Отладочный режим» сервера (server_panel.py)
+
+; Фон экрана и верхней полосы с заголовком. Пусто — как у плеера (по теме)
+server_BGCol =
+server_appbarBGCol =
+
+; Карточки разделов («Состояние», «Буфер сети»): фон, рамка, скругление. По стандарту surfacecontainer, outlinevariant и 12
+server_cardBGCol = surfacecontainer
+server_cardBorderCol = outlinevariant
+server_cardRadius = 12
+
+; Размер заголовков разделов и остального текста. По стандарту 16 и 13
+server_titleSize = 16
+server_textSize = 13
+
+; Цвет значений и подписей слева от них. По стандарту white и gray
+server_textCol = white
+server_labelCol = gray
+
+; Цвет «онлайн», «сохранено» и цвет ошибок. По стандарту green и redaccent
+server_okCol = green
+server_errCol = redaccent
+
+; Ползунок буфера и кнопки (фон, текст). По стандарту indigo800, blue и white
+server_sliderThumbCol = indigo800
+server_buttonBGCol = blue
+server_buttonTextCol = white

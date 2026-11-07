@@ -24,6 +24,7 @@ class Config:
     host: str
     port: int
     tokens: dict            # имя -> токен; пусто — сервер открыт для всех
+    admins: frozenset = frozenset()   # имена из tokens, кому можно удалять файлы
 
 
 def _abs(base: Path, value: str) -> Path:
@@ -50,6 +51,12 @@ def load_config(ini_path: Path = INI_PATH) -> Config:
     if legacy and legacy not in tokens.values():
         tokens.setdefault("owner", legacy)
 
+    # [Server] admins = me, sasha — только имена, у которых есть токен.
+    # Сервер без токенов администраторов не имеет: удалять мог бы любой в сети
+    admins = frozenset(
+        a.strip().lower() for a in cp.get("Server", "admins", fallback="").split(",")
+        if a.strip().lower() in tokens)
+
     return Config(
         root=_abs(base, cp.get("Library", "root", fallback="./music")),
         covers_dir=_abs(base, cp.get("Library", "covers_dir", fallback="./covers")),
@@ -59,4 +66,5 @@ def load_config(ini_path: Path = INI_PATH) -> Config:
         host=cp.get("Server", "host", fallback="127.0.0.1"),
         port=cp.getint("Server", "port", fallback=8000),
         tokens=tokens,
+        admins=admins,
     )

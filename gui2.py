@@ -14,6 +14,7 @@ import time
 import threading
 import cover_worker
 import queue_worker
+import server_panel
 tags = {"Название": "Выберите трек", "Автор": "", "Альбом": "", "Год": "", "Жанр": "",}
 
 import logging
@@ -58,6 +59,17 @@ RBOX_b_radius = config.getint('RBOX Settings', 'b_radius') #закруглени
 # Конфиги DBOX =========
 DBOX_b_radius = config.getint('DBOX Settings', 'b_radius') #закругление DBOX ui рамки c: 20
 
+# Конфиги host_settings_button =========
+host_settings_button_Col = config.get('UI host_settings_button', 'host_settings_button_col') # Цвет иконки кнопки настроек хоста
+host_settings_button_BGcol = config.get('UI host_settings_button', 'host_settings_button_BGcol') # Цвет фона кнопки настроек хоста
+host_settings_button_Bcol = config.get('UI host_settings_button','host_settings_button_Bcol') # Цвет рамки (обводки) кнопки настроек хоста
+host_settings_button_Btol = config.getfloat('UI host_settings_button','host_settings_button_Btol') # Толщина рамки (обводки) кнопки настроек хоста
+host_settings_button_Radius = config.getfloat('UI host_settings_button','host_settings_button_Radius') # Сила скругления углов кнопки настроек хоста
+# Конфиги adress_button =========
+adress_ButtonBGCol = config.get('UI adress_button','adress_ButtonBGCol') # Цвет фона кнопки выбора файла справа от строки
+adress_Button_BCol = config.get('UI adress_button','adress_Button_BCol') # Цвет рамки (обводки) кнопки выбора файла справа от строки
+adress_Button_BTol = config.getfloat('UI adress_button','adress_Button_BTol') # Толщина рамки (обводки) кнопки выбора файла справа от строки
+adress_Button_Radius = config.getfloat('UI adress_button','adress_Button_Radius') # Сила скругления углов кнопки выбора файла справа от строки
 # Конфиги adress_bar =========
 adress_barBGCol = config.get('UI adress_bar', 'adress_barBGCol') # Цвет фона строки
 adress_barBGOp = config.getfloat('UI adress_bar','adress_barBGOp') # Прозрачность фона строки
@@ -241,6 +253,14 @@ start_local_path = p
 start_server_path = f"srv://{sources.SRV_ID}/d"
 last_local_path = ""
 last_server_path = ""
+
+current_random_picker_from = "cur_fol"
+current_random_picker_to = "to_start"
+current_random_picker_text = p
+
+# бловство с двумя цветами
+first_color = ft.Colors.RED
+second_color = ft.Colors.BLUE
 
 class VirtualList:
     """Оконный ("виртуальный") рендер длинного списка в прокручиваемом ft.Column.
@@ -701,6 +721,129 @@ def App(page: ft.Page):
             actions=[
                 ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
                 ft.ElevatedButton("Сохранить", on_click=lambda e: save_selection(e, p_id=pl_id), bgcolor=buttonBGCol, color=buttonTextCol)
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        open_dialog(page, dlg)
+
+    def setting_random_track_picker():
+        folder_path_field = ft.TextField(
+            label="Путь к папке",
+            value=current_random_picker_text,
+            disabled=True if current_random_picker_from != "set_fol" else False,
+            dense=True,
+        )
+
+        def handle_set_folder(e): # изменить
+                global current_random_picker_text
+                import tkinter as tk
+                from tkinter import filedialog
+        
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True) 
+        
+                directory_path = filedialog.askdirectory(title="Выберите папку с музыкой")
+                root.destroy()
+        
+                if directory_path:
+                    src = sources.get(directory_path)
+                    if src.is_dir(directory_path):
+                        current_random_picker_text = directory_path
+                        folder_path_field.value = directory_path
+                        folder_path_field.update()
+                    else:
+                        logger.error(f"Указанный путь не является директорией: {directory_path}")
+
+        pick_folder_button = ft.IconButton( # кнопка выбора папки
+                height=33,
+                icon=ft.Icon(
+                    ft.Icons.FOLDER_ROUNDED,
+                    offset=ft.Offset(0, -0.15),
+                    color=adress_ButtonIconCol,
+                ),                                                        
+                style=ft.ButtonStyle(
+                    bgcolor=adress_ButtonBGCol,
+                    side=ft.BorderSide(adress_Button_BTol, adress_Button_BCol),
+                    shape=ft.RoundedRectangleBorder(radius=adress_Button_Radius)
+                ),
+                on_click = handle_set_folder,
+                visible=True if current_random_picker_from == "set_fol" else False
+            )
+
+        def save_selection(e):
+            global current_random_picker_from, current_random_picker_to, current_random_picker_text
+            current_random_picker_from = from_radio_buttons.value
+            current_random_picker_to = to_radio_buttons.value
+            current_random_picker_text = folder_path_field.value
+            close_dialog(page, dlg)
+            logger.info(f"Настройки случайного трека успешно применены")
+
+        def from_changed(e):
+            if e.control.value == "set_fol":
+                folder_path_field.disabled = False
+                pick_folder_button.visible = True
+            else:
+                folder_path_field.disabled = True
+                pick_folder_button.visible = False
+            folder_path_field.update()
+            pick_folder_button.update()
+
+        from_radio_buttons = ft.RadioGroup(
+            value=current_random_picker_from,
+            on_change=from_changed,
+            content=ft.Column(
+                controls=[
+                    ft.Row([
+                        ft.CupertinoRadio(value="cur_fol", inactive_color=first_color),
+                        ft.Text("Текущей папки в проводнике"),
+                    ],spacing=5, tight=True),
+                    ft.Row([
+                        ft.CupertinoRadio(value="set_fol", inactive_color=first_color),
+                        ft.Text("Указанной папки"),
+                    ],spacing=5, tight=True),
+                    ft.Row([
+                        ft.CupertinoRadio(value="all_lib", inactive_color=first_color),
+                        ft.Text("Всей серверной библиотеки"),
+                    ],spacing=5, tight=True),
+                ],
+            ),
+        )
+        to_radio_buttons = ft.RadioGroup(
+            value=current_random_picker_to,
+            content=ft.Column(
+                controls=[
+                    ft.Row([
+                        ft.CupertinoRadio(value="to_start", inactive_color=second_color),
+                        ft.Text("В начало очереди"),
+                    ],spacing=5, tight=True),
+                    ft.Row([
+                        ft.CupertinoRadio(value="to_end", inactive_color=second_color),
+                        ft.Text("В конец очереди"),
+                    ],spacing=5, tight=True),
+                ],
+            ),
+        )
+        
+        # Создаем диалог
+        dlg = ft.AlertDialog(
+            title=ft.Row([
+                ft.Icon(ft.Icons.CHECKLIST_OUTLINED),
+                ft.Text("Добавить случайный трек из:")
+            ]),
+            content=ft.Container(
+                width=250,
+                height=200,
+                content=ft.Column([
+                    from_radio_buttons,
+                    ft.Row([folder_path_field, pick_folder_button]),
+                    to_radio_buttons,
+                ], spacing=10),
+            ),
+            actions=[
+                ft.TextButton("Отмена", on_click=lambda e: close_dialog(page, dlg)),
+                ft.ElevatedButton("Сохранить", on_click=save_selection, bgcolor=buttonBGCol, color=buttonTextCol)
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -1236,11 +1379,22 @@ def App(page: ft.Page):
             spacing=0,
             controls=[
             # ft.Text("Очередь воспроизведения", size=20, weight=ft.FontWeight.BOLD),
-            ft.IconButton(
-                height=40,
-                icon=ft.Icon(ft.Icons.COMPARE_ARROWS,offset=ft.Offset(),color=adress_ButtonIconCol),
-                on_click=lambda e: ui_utils.mix_queue(rebuild_queue_ui),
-            ),
+            ft.Row(
+                controls=[
+                ft.IconButton( # Перемешать очередь
+                                height=40,
+                                icon=ft.Icon(ft.Icons.COMPARE_ARROWS,offset=ft.Offset(),color=adress_ButtonIconCol),
+                                on_click=lambda e: ui_utils.mix_queue(rebuild_queue_ui),
+                            ),
+                ft.GestureDetector( content=ft.IconButton( # Случайный трек
+                                height=40,
+                                icon=ft.Icon(ft.Icons.PLUS_ONE_OUTLINED,offset=ft.Offset(),color=adress_ButtonIconCol),
+                                on_click=lambda e: ui_utils.pick_random_track(current_random_picker_from, current_random_picker_to, current_random_picker_text),
+                            ),
+                            on_secondary_tap=lambda e: setting_random_track_picker(),
+                ),
+                #...
+                ],),
             ft.Divider(),
             queue_list
         ]),
@@ -1983,6 +2137,21 @@ def App(page: ft.Page):
         ),
     )
 
+    host_settings_button = ft.IconButton(
+        height=33,
+        icon=ft.Icon(
+            ft.Icons.WEB_ASSET_ROUNDED,
+            offset=ft.Offset(0, -0.15),
+            color=host_settings_button_Col,
+        ),                                                        
+        style=ft.ButtonStyle(
+            bgcolor=host_settings_button_BGcol,
+            side=ft.BorderSide(host_settings_button_Btol, host_settings_button_Bcol),
+            shape=ft.RoundedRectangleBorder(radius=host_settings_button_Radius)
+        ),
+        on_click=lambda e: server_panel.open_server_panel(page)
+    )
+
     _pending_dir = [None]
     _loading_timer = [None]
     LOADING_DELAY = 0.5   # через сколько секунд ожидания показывать индикатор
@@ -2216,7 +2385,8 @@ def App(page: ft.Page):
                                 content=ft.Row(
                                     controls=[
                                         queue_progress_bar,
-                                        queue_status_text
+                                        queue_status_text,
+                                        host_settings_button
                                         ]
                                     )
                                 )

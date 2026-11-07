@@ -252,6 +252,15 @@ def vol_slider_event(e, vol_label):
 
 #Логика воспроизведение аудио ----
 
+def media_options(uri):
+    """Опции VLC для одного трека. Буфер сети передаётся здесь, а не только при
+    создании VLC (utils.create_player): тогда новое значение из отладочного
+    экрана действует со следующего трека, без перезапуска плеера."""
+    if sources.is_remote(uri):
+        return (f":network-caching={sources.SRV_CACHING}",)
+    return ()
+
+
 def _retry_tags(page, uri, gen):
     """Теги серверного трека пришли заглушкой («сервер недоступен») — перезапрашиваем
     в фоне, пока играет тот же трек. VLC сам доигрывает поток, когда сервер
@@ -306,7 +315,7 @@ def load_track(page, uri, play_btn_obj, idx): #через проводник
     # on_tags_changed по полю "playing". Параметр оставлен, чтобы не менять вызовы.
     if player:
         player.stop()
-        player.set_mrl(mrl)
+        player.set_mrl(mrl, *media_options(uri))
         will_play = not autoplayswitch
         if will_play:
             player.play()
@@ -815,7 +824,7 @@ def bg_ui_process(page: ft.Page, play_btn):
                         retry_at = None
                         pending_seek = last_pos or None
                         ended_handled = False
-                        player.set_mrl(sources.get(current_uri).mrl(current_uri))
+                        player.set_mrl(sources.get(current_uri).mrl(current_uri), *media_options(current_uri))
                         player.play()
 
                 elif state == vlc.State.Playing:

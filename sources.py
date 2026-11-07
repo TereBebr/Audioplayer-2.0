@@ -475,6 +475,12 @@ class RemoteSource:
         return f"srv://{SRV_ID}/d"
 
     def _get(self, path, params=None, stream=False, probe=False):
+        return self._request("GET", path, params=params, stream=stream, probe=probe)
+
+    def _request(self, method, path, params=None, stream=False, probe=False,
+                 headers=None, allow=()):
+        """Единственная точка выхода в сеть. allow — коды ответа, которые вызывающий
+        разбирает сам (например, 409 у rescan), вместо исключения."""
         url = f"{SRV_BASE_URL}{path}"
         if not SRV_ENABLED:
             # единственная точка выхода в сеть: при enabled = False не уходит ни один запрос
@@ -483,14 +489,18 @@ class RemoteSource:
             # фоновый опрос уже знает, что сервера нет: не ждём таймаут на каждом запросе.
             # Сам опрос (ping) идёт с probe=True — иначе он не узнал бы, что сервер вернулся
             raise RemoteUnavailable("сервер недоступен (по последнему опросу)")
-        headers = {"Authorization": f"Bearer {SRV_TOKEN}"} if SRV_TOKEN else {}
+        headers = dict(headers or {})
+        if SRV_TOKEN:
+            headers["Authorization"] = f"Bearer {SRV_TOKEN}"
         try:
-            r = self.session.get(url, params=params, headers=headers,
-                                stream=stream, timeout=SRV_TIMEOUT)
+            r = self.session.request(method, url, params=params, headers=headers,
+                                     stream=stream, timeout=SRV_TIMEOUT)
         except RequestException as err:
             if not probe:
                 _wake.set()   # пусть опрос проверит сервер прямо сейчас
             raise RemoteUnavailable(f"Сервер недоступен [{url}]: {err}") from err
+        if r.status_code in allow:
+            return r
         if r.status_code == 401:
             # отдельное сообщение: иначе неверный токен выглядит как «сервер недоступен»
             raise RemoteUnavailable(f"{url} -> 401: токен в config.txt не совпадает с server.ini")
@@ -654,6 +664,65 @@ class RemoteSource:
         rel = rel.strip('/')
         return f"Сервер/{rel}" if rel else "Сервер"
 
+    # ---- отладочный экран сервера (server_panel.py) ----
+    # В отличие от методов выше, исключения RemoteUnavailable/RemoteNotFound
+    # выпускаются наружу: экрану нужно показать, что именно не так
+
+    def rescan(self):
+        """Запустить пересканирование библиотеки. "started" или "running" (уже идёт)."""
+        r = self._request("POST", "/server/rescan", allow=(409,))
+        return "running" if r.status_code == 409 else "started"
+
+    def _any_track_id(self):
+        """id какого-нибудь трека для замера скорости: первая папка вглубь до трека.
+        На строгой структуре Исполнитель/Альбом/трек это три запроса."""
+        rel = ""
+        for _ in range(6):
+            rows = self._get("/server/browse", params={"folder_path": rel}).json()
+            for row in rows:
+                if row["type"] == "track":
+                    return row["id"]
+            folders = [row for row in rows if row["type"] == "folder"]
+            if not folders:
+                break
+            rel = folders[0]["path"]
+        raise RemoteNotFound("на сервере не нашлось ни одного трека")
+
+    def measure_link(self, track_uri=None, samples=5, probe_bytes=2 * 1024 * 1024):
+        """Замер связи для подбора network_caching.
+
+        Время ответа — samples запросов /server/ping. Скорость — первые probe_bytes
+        потока трека track_uri (или любого трека на сервере). Битрейт — из строки
+        этого трека в индексе. Возвращает словарь для recommend_caching и экрана."""
+        rtts = []
+        for _ in range(samples):
+            t0 = time.perf_counter()
+            self._get("/server/ping")
+            rtts.append((time.perf_counter() - t0) * 1000)
+
+        track_id = self._parse(track_uri)[1] if track_uri and is_remote(track_uri) else self._any_track_id()
+        row = self._track_row(track_id)
+        t0 = time.perf_counter()
+        r = self._request("GET", f"/server/stream/{track_id}", stream=True,
+                          headers={"Range": f"bytes=0-{probe_bytes - 1}"})
+        got = 0
+        try:
+            for chunk in r.iter_content(64 * 1024):
+                got += len(chunk)
+                if got >= probe_bytes:
+                    break
+        finally:
+            r.close()
+        sec = max(time.perf_counter() - t0, 1e-3)
+
+        return {
+            "rtt_avg": sum(rtts) / len(rtts),
+            "rtt_max": max(rtts),
+            "speed_kbps": got * 8 / 1000 / sec,
+            "bitrate_kbps": row.get("bitrate") or 0,
+            "track": f"{row.get('author') or '?'} — {row.get('name') or track_id}",
+        }
+
     def search(self, query: str, folder_uri: str | None = None, items: list | None = None) -> list | None:
         """Функция активного поиска"""   
         if not query.strip():
@@ -692,6 +761,61 @@ def server_online() -> bool:
 def server_info() -> dict | None:
     """Последний ответ /server/ping или None."""
     return _srv_state["info"]
+
+CACHING_MIN, CACHING_MAX = 300, 10000   # границы ползунка в отладочном экране, мс
+
+def recommend_caching(m: dict) -> int:
+    """Рекомендуемый network_caching по замеру measure_link. Эвристика:
+    скорости впритык к битрейту — большой буфер, чтобы пережить провалы;
+    с запасом по скорости хватает нескольких времён ответа."""
+    bitrate = m["bitrate_kbps"] or 1000   # битрейт неизвестен — считаем как FLAC
+    ratio = m["speed_kbps"] / bitrate
+    if ratio < 2:
+        ms = 8000
+    elif ratio < 5:
+        ms = 5000
+    else:
+        ms = max(1000, 3 * m["rtt_max"])
+    return int(min(CACHING_MAX, max(CACHING_MIN, round(ms / 100) * 100)))
+
+def set_network_caching(ms: int, path="config.txt"):
+    """Новый буфер сети VLC: сразу в SRV_CACHING (load_track берёт его для каждого
+    серверного трека) и в config.txt.
+
+    В файле меняется только строка network_caching в [Server]: configparser.write
+    стёр бы все комментарии. BOM и переводы строк сохраняются как были."""
+    global SRV_CACHING
+    SRV_CACHING = int(ms)
+
+    raw = open(path, "rb").read()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    text = raw.decode("utf-8-sig")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+    line = f"network_caching = {SRV_CACHING}"
+
+    section, header_at, done = None, None, False
+    for i, l in enumerate(lines):
+        st = l.strip()
+        if st.startswith("[") and st.endswith("]"):
+            section = st[1:-1].strip()
+            if section == "Server":
+                header_at = i
+            continue
+        if section == "Server" and st.split("=", 1)[0].strip() == "network_caching" and "=" in st:
+            lines[i] = line
+            done = True
+            break
+    if not done:
+        if header_at is None:
+            lines += ["", "[Server]", line]
+        else:
+            lines.insert(header_at + 1, line)
+
+    data = nl.join(lines).encode("utf-8")
+    with open(path, "wb") as f:
+        f.write((b"\xef\xbb\xbf" if bom else b"") + data)
+    logger.info(f"network_caching = {SRV_CACHING} мс (сохранено в {path})")
 
 def start_server_watch(page, interval_online=60.0, interval_offline=15.0):
     """Опрашивает сервер в фоне и шлёт 'server_status' в UI при смене состояния.
