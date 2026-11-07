@@ -380,6 +380,20 @@ def stream_sig(token: str, track_id) -> str:
     Две одинаковые копии: server/server.py и sources.py — менять обе."""
     return hmac.new(token.encode(), f"stream:{track_id}".encode(), hashlib.sha256).hexdigest()[:32]
 
+# Чтение при передаче файла: 5 секунд SRV_TIMEOUT мало — сервер пишет на HDD
+# и может не отвечать, пока сбрасывает буфер большого FLAC
+TRANSFER_READ_TIMEOUT = 60
+
+
+def _detail(r) -> str:
+    """Текст ошибки FastAPI ({"detail": ...}) или пусто."""
+    try:
+        d = r.json().get("detail")
+    except (ValueError, AttributeError):
+        return ""
+    return d if isinstance(d, str) else ""
+
+
 class RemoteUnavailable(Exception):
     """Сервер недоступен или произошла сетевая ошибка."""
     pass
@@ -478,9 +492,10 @@ class RemoteSource:
         return self._request("GET", path, params=params, stream=stream, probe=probe)
 
     def _request(self, method, path, params=None, stream=False, probe=False,
-                 headers=None, allow=()):
+                 headers=None, allow=(), data=None, timeout=None):
         """Единственная точка выхода в сеть. allow — коды ответа, которые вызывающий
-        разбирает сам (например, 409 у rescan), вместо исключения."""
+        разбирает сам (например, 409 у rescan), вместо исключения.
+        timeout — свой для передачи файлов: (подключение, чтение)."""
         url = f"{SRV_BASE_URL}{path}"
         if not SRV_ENABLED:
             # единственная точка выхода в сеть: при enabled = False не уходит ни один запрос
@@ -493,14 +508,16 @@ class RemoteSource:
         if SRV_TOKEN:
             headers["Authorization"] = f"Bearer {SRV_TOKEN}"
         try:
-            r = self.session.request(method, url, params=params, headers=headers,
-                                     stream=stream, timeout=SRV_TIMEOUT)
+            r = self.session.request(method, url, params=params, headers=headers, data=data,
+                                     stream=stream, timeout=timeout or SRV_TIMEOUT)
         except RequestException as err:
             if not probe:
                 _wake.set()   # пусть опрос проверит сервер прямо сейчас
             raise RemoteUnavailable(f"Сервер недоступен [{url}]: {err}") from err
         if r.status_code in allow:
             return r
+        if r.status_code == 403:
+            raise RemoteUnavailable(f"{url} -> 403: {_detail(r) or 'нет прав'}")
         if r.status_code == 401:
             # отдельное сообщение: иначе неверный токен выглядит как «сервер недоступен»
             raise RemoteUnavailable(f"{url} -> 401: токен в config.txt не совпадает с server.ini")
@@ -722,6 +739,46 @@ class RemoteSource:
             "bitrate_kbps": row.get("bitrate") or 0,
             "track": f"{row.get('author') or '?'} — {row.get('name') or track_id}",
         }
+
+    # ---- отладочный режим: файлы на сервере (docs/TZ_server_panel.md §5) ----
+    # Исключения RemoteUnavailable / RemoteNotFound выходят наружу: экран показывает их сам.
+
+    def me(self):
+        """{"name": ..., "admin": bool}. RemoteNotFound — сервер старее 0.2."""
+        return self._get("/server/me").json()
+
+    def ls(self, rel=""):
+        """Одна папка сервера с диска: {"dirs": [{name, path}], "files": [{name, path, size, kind}]}."""
+        return self._get("/server/ls", params={"path": rel}).json()
+
+    def list_files(self, rel=""):
+        """Все аудио и картинки под папкой, рекурсивно: [{rel_path, size, kind}]."""
+        return self._get("/server/files", params={"path": rel}).json()
+
+    def start_op(self, folder):
+        return self._request("POST", "/server/ops", params={"folder": folder}).json()["op_id"]
+
+    def ops(self, mine=True):
+        return self._get("/server/ops", params={"mine": int(mine)}).json()
+
+    def undo(self, op_id):
+        """{"removed": [...], "skipped": [{path, reason}], "dirs_removed": [...]}"""
+        return self._request("POST", f"/server/ops/{op_id}/undo").json()
+
+    def delete(self, rel):
+        return self._request("DELETE", "/server/file", params={"path": rel}).json()
+
+    def upload_file(self, rel, op_id, body):
+        """PUT одного файла. body — объект с read() и __len__: requests шлёт его потоком
+        с Content-Length, файл в память целиком не читается. Ответы 400/409/410/507
+        возвращаются как есть — их причину экран показывает по файлу."""
+        return self._request("PUT", "/server/file", params={"path": rel, "op": op_id}, data=body,
+                             timeout=(SRV_TIMEOUT, TRANSFER_READ_TIMEOUT), allow=(400, 409, 410, 507))
+
+    def download_file(self, rel):
+        """GET одного файла потоком; закрыть ответ — дело вызывающего."""
+        return self._request("GET", "/server/file", params={"path": rel}, stream=True,
+                             timeout=(SRV_TIMEOUT, TRANSFER_READ_TIMEOUT))
 
     def search(self, query: str, folder_uri: str | None = None, items: list | None = None) -> list | None:
         """Функция активного поиска"""   

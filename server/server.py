@@ -263,6 +263,16 @@ def files_under(path: str = ""):
     return uploads.list_files(cfg.root, folder)
 
 
+@app.get("/server/ls")
+def ls_dir(path: str = ""):
+    """Одна папка с диска, как есть: подпапки и разрешённые файлы с размерами.
+    /server/browse берёт треки из индекса — там нет картинок, covers/ и размеров."""
+    folder = safe_path(path)
+    if not folder.is_dir():
+        raise HTTPException(404, "folder not found")
+    return uploads.list_dir(cfg.root, folder)
+
+
 @app.get("/server/file")
 def get_file(path: str):
     p = safe_path(path)

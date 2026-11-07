@@ -2727,7 +2727,7 @@ def App(page: ft.Page):
     page.pubsub.subscribe_topic("queue_progress", on_queue_progress)
     page.pubsub.subscribe_topic("cover_ready", on_cover_ready)
     def handle_disconnect(e):
-        page.pubsub.unsubscribe_topic("queue_progress", on_queue_progress)
+        page.pubsub.unsubscribe_topic("queue_progress")
         page.pubsub.unsubscribe_topic("cover_ready", on_cover_ready)
         page.pubsub.unsubscribe_topic("dir_ready", on_dir_ready)
         page.pubsub.unsubscribe_topic("search_ready", on_search_ready)

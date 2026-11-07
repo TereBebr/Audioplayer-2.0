@@ -168,6 +168,30 @@ def list_files(root: Path, folder: Path) -> list[dict]:
     return out
 
 
+def list_dir(root: Path, folder: Path) -> dict:
+    """Содержимое одной папки для файлового менеджера плеера. Без обхода вглубь:
+    в корне это тысячи исполнителей, и подсчёт файлов в каждом обошёл бы весь диск."""
+    root = root.resolve()
+    dirs, files = [], []
+    with os.scandir(folder) as it:
+        for e in it:
+            if e.name.startswith("."):
+                continue
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    dirs.append({"name": e.name, "path": Path(e.path).relative_to(root).as_posix()})
+                elif e.is_file(follow_symlinks=False):
+                    kind = file_kind(e.name)
+                    if kind:
+                        files.append({"name": e.name, "path": Path(e.path).relative_to(root).as_posix(),
+                                      "size": e.stat().st_size, "kind": kind})
+            except OSError:
+                continue
+    dirs.sort(key=lambda x: x["name"].lower())
+    files.sort(key=lambda x: x["name"].lower())
+    return {"dirs": dirs, "files": files}
+
+
 # ------------------------------------------------------------- журнал операций
 
 SCHEMA = """

@@ -406,3 +406,17 @@ server_errCol = redaccent
 server_sliderThumbCol = indigo800
 server_buttonBGCol = blue
 server_buttonTextCol = white
+
+; Конфликты имён в предпросмотре загрузки (CD1/CD2 с одинаковым треком). По стандарту orange
+server_warnCol = orange
+
+; Вкладки «Сервер / Файлы / Операции»: полоска под выбранной. Пусто — как фон кнопок
+server_tabIndicatorCol =
+
+; Список файлов: значки папок и файлов, высота строки. По стандарту gray и 40
+server_iconCol = gray
+server_rowHeight = 40
+
+; Панель передачи внизу экрана: цвет полосы прогресса и фон панели. Пусто — как фон кнопок и карточек
+server_progressCol =
+server_progressBGCol =
