@@ -740,6 +740,19 @@ class RemoteSource:
             "track": f"{row.get('author') or '?'} — {row.get('name') or track_id}",
         }
 
+    def random_track(self, uri=None):
+        """URI случайного трека из серверной папки uri и всех её подпапок
+        (None или корень — вся библиотека). None — в папке нет треков или сервер
+        недоступен. Строка трека сразу кладётся в кэш: теги не нужно запрашивать ещё раз."""
+        try:
+            rel = self._parse(uri)[1] if uri else ""
+            row = self._get("/server/random", params={"folder_path": rel}).json()
+        except (RemoteUnavailable, RemoteNotFound) as e:
+            logger.error(f"random_track {uri}: {e}")
+            return None
+        self._prime([row])
+        return self._track_uri(row["id"])
+
     # ---- отладочный режим: файлы на сервере (docs/TZ_server_panel.md §5) ----
     # Исключения RemoteUnavailable / RemoteNotFound выходят наружу: экран показывает их сам.
 

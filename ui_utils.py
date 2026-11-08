@@ -250,6 +250,42 @@ def vol_slider_event(e, vol_label):
     if player:
         player.audio_set_volume(vol)
 
+def local_pick_track(root, tries=20, max_depth=12):
+    """Случайный трек через спуск по случайным подпапкам."""
+    for _ in range(tries):
+        cur = root
+        for _ in range(max_depth):
+            try:
+                with os.scandir(cur) as it:
+                    entries = [e for e in it if not e.name.startswith(".")]
+            except OSError:
+                break
+            pool = [e for e in entries if e.is_dir() or os.path.splitext(e.name)[1].lower() in sources.SUPPORTED_FORMATS]
+            if not pool:
+                break
+            pick = random.choice(pool)
+            if not pick.is_dir():
+                return pick.path
+            cur = pick.path
+    return None
+
+def pick_random_track(current_random_picker_from, current_random_picker_to, current_random_picker_text, current_dir):
+    src = sources.get(current_dir)
+    match current_random_picker_from:
+        case "cur_fol":
+            if src.is_remote:
+                uri = sources.REMOTE.random_track(current_dir)
+            else:
+                uri = local_pick_track(current_dir)
+        case "set_fol":
+            uri = local_pick_track(current_random_picker_text)
+        case "all_lib":
+            uri = sources.REMOTE.random_track(None)
+    if current_random_picker_to == "to_start":
+        add_queue(uri, 1)
+    elif current_random_picker_to == "to_end":
+        add_queue(uri, None)
+
 #Логика воспроизведение аудио ----
 
 def media_options(uri):

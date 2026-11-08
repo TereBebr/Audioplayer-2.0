@@ -134,6 +134,21 @@ def tracks_in_dir(con: sqlite3.Connection, rel_dir: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def random_track_under(con: sqlite3.Connection, rel_dir: str) -> sqlite3.Row | None:
+    """Один случайный трек из папки и всех подпапок ("" — вся библиотека), или None.
+    Фильтр тот же, что в tracks_under_dir. ORDER BY RANDOM() LIMIT 1 не сортирует всё:
+    SQLite держит одну лучшую строку, на 18 тыс. треков это миллисекунды."""
+    if rel_dir == "":
+        return con.execute(
+            "SELECT * FROM tracks WHERE missing = 0 ORDER BY RANDOM() LIMIT 1").fetchone()
+    prefix = rel_dir + "/"
+    return con.execute(
+        "SELECT * FROM tracks WHERE missing = 0 AND (dir = ? OR substr(dir, 1, ?) = ?) "
+        "ORDER BY RANDOM() LIMIT 1",
+        (rel_dir, len(prefix), prefix),
+    ).fetchone()
+
+
 def tracks_under_dir(con: sqlite3.Connection, rel_dir: str) -> list[sqlite3.Row]:
     """Треки в папке и всех подпапках, для «добавить папку в очередь».
     substr вместо LIKE/GLOB: в именах папок бывают %, _ и [ — их пришлось бы экранировать."""

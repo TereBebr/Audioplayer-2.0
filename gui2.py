@@ -1389,7 +1389,7 @@ def App(page: ft.Page):
                 ft.GestureDetector( content=ft.IconButton( # Случайный трек
                                 height=40,
                                 icon=ft.Icon(ft.Icons.PLUS_ONE_OUTLINED,offset=ft.Offset(),color=adress_ButtonIconCol),
-                                on_click=lambda e: ui_utils.pick_random_track(current_random_picker_from, current_random_picker_to, current_random_picker_text),
+                                on_click=lambda e: ui_utils.pick_random_track(current_random_picker_from, current_random_picker_to, current_random_picker_text, getattr(explorer_tree, "current_dir", "")),
                             ),
                             on_secondary_tap=lambda e: setting_random_track_picker(),
                 ),

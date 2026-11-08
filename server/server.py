@@ -145,6 +145,18 @@ def tracks_under(folder_path: str = ""):
     with closing(db.get_conn(cfg.db_path)) as con:
         return [dict(r) for r in db.tracks_under_dir(con, folder_path)]
 
+@app.get("/server/random")
+def random_track(folder_path: str = ""):
+    """Случайный трек папки со всеми подпапками ("" — вся библиотека) — кнопка
+    «случайный трек» в плеере. 404, если в папке нет ни одного трека."""
+    if folder_path and not safe_path(folder_path).is_dir():
+        raise HTTPException(404, "folder not found")
+    with closing(db.get_conn(cfg.db_path)) as con:
+        row = db.random_track_under(con, folder_path)
+    if row is None:
+        raise HTTPException(404, "no tracks in folder")
+    return dict(row)
+
 @app.get("/server/search")
 def all_library_search(q: str, folder_path: str=""):
     if folder_path and not safe_path(folder_path).is_dir():   # safe_path сам даст 403 на ../
